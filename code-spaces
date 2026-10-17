@@ -7,7 +7,13 @@
 
 export VSCODE_SKIP_NODE_VERSION_CHECK=1
 export VSCODE_SKIP_PRELAUNCH=1
-ROOT="$(cd "$(dirname "$0")" && pwd)"
+SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$SOURCE" ]; do
+  DIR="$( cd -P "$( dirname "$SOURCE" )" >/dev/null 2>&1 && pwd )"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+ROOT="$( cd -P "$( dirname "$SOURCE" )" >/dev/null 2>&1 && pwd )"
 
 # Ensure user settings have Spaces and Resource Optimization enabled
 USER_SETTINGS="$HOME/.vscode-oss-dev/data/User/settings.json"
