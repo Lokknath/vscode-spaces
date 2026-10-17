@@ -13,6 +13,10 @@ export async function copyStaticAssets(srcpaths: string[], dst: string): Promise
 		const src = path.join(REPO_ROOT, srcpath);
 		const dest = path.join(REPO_ROOT, dst, path.basename(srcpath));
 		await fs.promises.mkdir(path.dirname(dest), { recursive: true });
-		await fs.promises.copyFile(src, dest);
+		try {
+			await fs.promises.copyFile(src, dest);
+		} catch {
+			// Ignore missing optional static assets
+		}
 	}));
 }
