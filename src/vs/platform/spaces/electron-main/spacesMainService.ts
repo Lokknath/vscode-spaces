@@ -201,12 +201,6 @@ export class SpacesMainService extends Disposable implements ISpacesMainService 
 
 	private async openAsSpace(callerWindowId: number | undefined, open: () => Promise<ICodeWindow[]>): Promise<ISpaceOperationResult> {
 
-		// Hiding a native fullscreen window leaves an empty desktop behind on macOS
-		const activeWindow = this.getActiveSpaceWindow();
-		if (activeWindow && this.isInNativeFullScreen(activeWindow)) {
-			return { result: SpaceOperationResult.NativeFullScreen };
-		}
-
 		// The window that runs the first Spaces command becomes a Space itself
 		const callerWindow = this.getSupportedWindow(callerWindowId);
 		if (callerWindow) {
@@ -305,10 +299,6 @@ export class SpacesMainService extends Disposable implements ISpacesMainService 
 			return { result: SpaceOperationResult.Ok, space: target };
 		}
 
-		if (previousWindow && this.isInNativeFullScreen(previousWindow)) {
-			return { result: SpaceOperationResult.NativeFullScreen };
-		}
-
 		const previousWin = previousWindow?.win && !previousWindow.win.isDestroyed() ? previousWindow.win : undefined;
 
 		// Update the model first: the `show` and `focus` events fired below
@@ -337,6 +327,14 @@ export class SpacesMainService extends Disposable implements ISpacesMainService 
 		if (previousWindow && previousWin?.isVisible()) {
 			this.lastFrame = captureFrame(previousWin);
 			this.hideAuxiliaryWindows(previousWindow.id);
+			if (previousWin.isFullScreen()) {
+				try {
+					targetWin.setFullScreen(true);
+					previousWin.setFullScreen(false);
+				} catch {
+					// Ignore fullscreen toggle errors
+				}
+			}
 			previousWin.hide();
 			// Hibernate inactive Space to free GPU/CPU and trim memory
 			this.hibernateSpace(previousWindow);

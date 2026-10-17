@@ -60,8 +60,7 @@ function reportResult(notificationService: INotificationService, operation: ISpa
 		case SpaceOperationResult.Ok:
 			return true;
 		case SpaceOperationResult.NativeFullScreen:
-			notificationService.info(localize('spaces.nativeFullScreen', "Exit full screen before switching or creating Spaces."));
-			return false;
+			return true;
 		case SpaceOperationResult.UnsupportedWindow:
 			notificationService.info(localize('spaces.unsupportedWindow', "Spaces are not supported in this window."));
 			return false;
@@ -592,11 +591,18 @@ interface ISpacePickItem extends IQuickPickItem {
 	readonly githubUrl?: string;
 }
 
+let activeSpacesPickerDisposables: DisposableStore | undefined;
+
 /**
  * The Spaces dropdown: all Spaces categorized followed by Space management actions.
  * `manage` mode adds details and inline rename/close buttons.
  */
 async function showSpacesPicker(accessor: ServicesAccessor, mode: 'switch' | 'manage'): Promise<void> {
+	if (activeSpacesPickerDisposables) {
+		activeSpacesPickerDisposables.dispose();
+		activeSpacesPickerDisposables = undefined;
+	}
+
 	const spacesService = accessor.get(ISpacesService);
 	const quickInputService = accessor.get(IQuickInputService);
 	const labelService = accessor.get(ILabelService);
@@ -604,6 +610,9 @@ async function showSpacesPicker(accessor: ServicesAccessor, mode: 'switch' | 'ma
 	const nativeHostService = accessor.get(INativeHostService);
 	const notificationService = accessor.get(INotificationService);
 	const fileService = accessor.get(IFileService);
+
+	const disposables = new DisposableStore();
+	activeSpacesPickerDisposables = disposables;
 
 	const renameButton: IQuickInputButton = { iconClass: ThemeIcon.asClassName(Codicon.edit), tooltip: localize('spaces.renameButton', "Rename Space") };
 	const closeButton: IQuickInputButton = { iconClass: ThemeIcon.asClassName(Codicon.close), tooltip: localize('spaces.closeButton', "Close Space") };
@@ -702,34 +711,62 @@ async function showSpacesPicker(accessor: ServicesAccessor, mode: 'switch' | 'ma
 		return items;
 	};
 
-	const disposables = new DisposableStore();
 	const picker = disposables.add(quickInputService.createQuickPick<ISpacePickItem>({ useSeparators: true }));
+	disposables.add(picker.onDidHide(() => {
+		if (activeSpacesPickerDisposables === disposables) {
+			activeSpacesPickerDisposables = undefined;
+		}
+		disposables.dispose();
+	}));
+
 	picker.title = mode === 'manage' ? localize('spaces.manageTitle', "Manage Spaces") : localize('spaces.switchTitle', "Switch Space");
 	picker.placeholder = localize('spaces.placeholder', "Select a Space to switch to");
 	picker.matchOnDescription = true;
+	picker.busy = true;
+	picker.show();
 
 	const resolveGitHubUrls = async (spaces: readonly ISpace[]): Promise<Map<string, string>> => {
 		const map = new Map<string, string>();
 		await Promise.all(spaces.map(async space => {
 			if (space.workspace?.uri) {
-				const url = await getGitHubUrlForUri(fileService, space.workspace.uri);
-				if (url) {
-					map.set(space.id, url);
+				try {
+					const url = await getGitHubUrlForUri(fileService, space.workspace.uri);
+					if (url) {
+						map.set(space.id, url);
+					}
+				} catch {
+					// Ignore URL error
 				}
 			}
 		}));
 		return map;
 	};
 
-	const snapshot = await spacesService.getSpaces();
-	let gitHubUrls = await resolveGitHubUrls(snapshot.spaces);
-	picker.items = toItems(snapshot.spaces, gitHubUrls);
-	picker.activeItems = picker.items.filter((item): item is ISpacePickItem => item.type !== 'separator' && item.space?.windowId === nativeHostService.windowId);
+	spacesService.getSpaces().then(async snapshot => {
+		let gitHubUrls = new Map<string, string>();
+		picker.items = toItems(snapshot.spaces, gitHubUrls);
+		picker.activeItems = picker.items.filter((item): item is ISpacePickItem => item.type !== 'separator' && item.space?.windowId === nativeHostService.windowId);
+		picker.busy = false;
+
+		try {
+			gitHubUrls = await resolveGitHubUrls(snapshot.spaces);
+			picker.items = toItems(snapshot.spaces, gitHubUrls);
+		} catch {
+			// Ignore GitHub URL resolution error
+		}
+	}).catch(err => {
+		picker.busy = false;
+		notificationService.error(err);
+	});
 
 	disposables.add(spacesService.onDidChangeSpaces(async newSnapshot => {
 		picker.keepScrollPosition = true;
-		gitHubUrls = await resolveGitHubUrls(newSnapshot.spaces);
-		picker.items = toItems(newSnapshot.spaces, gitHubUrls);
+		try {
+			const urls = await resolveGitHubUrls(newSnapshot.spaces);
+			picker.items = toItems(newSnapshot.spaces, urls);
+		} catch {
+			picker.items = toItems(newSnapshot.spaces, new Map());
+		}
 	}));
 
 	disposables.add(picker.onDidTriggerItemButton(async ({ item, button }) => {
@@ -757,7 +794,4 @@ async function showSpacesPicker(accessor: ServicesAccessor, mode: 'switch' | 'ma
 			await commandService.executeCommand(item.commandId);
 		}
 	}));
-
-	disposables.add(picker.onDidHide(() => disposables.dispose()));
-	picker.show();
 }

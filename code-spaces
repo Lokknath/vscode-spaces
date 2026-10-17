@@ -26,10 +26,17 @@ for USER_SETTINGS in "$HOME/Library/Application Support/code-oss-dev/User/settin
 	"workbench.experimental.spaces.autoAdoptWindows": true,
 	"workbench.experimental.spaces.restoreOnStartup": true,
 	"workbench.experimental.spaces.focusEditorOnSwitch": true,
-	"workbench.experimental.spaces.refreshTerminalsOnSwitch": true
+	"workbench.experimental.spaces.refreshTerminalsOnSwitch": true,
+	"window.nativeFullScreen": false
 }
 EOF
 	fi
 done
 
-exec "$ROOT/scripts/code.sh" "$@"
+# Pass user extensions directory so all existing VS Code extensions are loaded in Spaces
+EXTENSIONS_ARG=""
+if [ -d "$HOME/.vscode/extensions" ]; then
+	EXTENSIONS_ARG="--extensions-dir=$HOME/.vscode/extensions"
+fi
+
+exec "$ROOT/scripts/code.sh" $EXTENSIONS_ARG "$@"

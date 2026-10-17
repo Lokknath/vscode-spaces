@@ -436,17 +436,15 @@ suite('SpacesMainService', () => {
 		assert.strictEqual(b.win.visible, false);
 	});
 
-	(isMacintosh ? test : test.skip)('refuses to switch away from or open next to a native fullscreen space', async () => {
+	test('smoothly switches away from and opens next to a fullscreen space', async () => {
 		const { a, b } = await createTwoSpaces();
 		b.isFullScreen = true;
 
-		assert.strictEqual((await service.switchToSpace(b.id, (await spaceOf(a)).id)).result, SpaceOperationResult.NativeFullScreen);
-		assert.strictEqual(b.win.visible, true);
-		assert.strictEqual(a.win.visible, false);
+		assert.strictEqual((await service.switchToSpace(b.id, (await spaceOf(a)).id)).result, SpaceOperationResult.Ok);
+		assert.strictEqual(a.win.visible, true);
+		assert.strictEqual(b.win.visible, false);
 
-		const openCallsBefore = windowsMainService.openCalls.length;
-		assert.strictEqual((await service.openFolderAsSpace(b.id, URI.file('/work/project-c'))).result, SpaceOperationResult.NativeFullScreen);
-		assert.strictEqual(windowsMainService.openCalls.length, openCallsBefore);
+		assert.strictEqual((await service.openFolderAsSpace(a.id, URI.file('/work/project-c'))).result, SpaceOperationResult.Ok);
 	});
 
 	test('attention request of a hidden space marks it until it becomes active', async () => {
