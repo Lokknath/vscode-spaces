@@ -15,16 +15,21 @@ while [ -h "$SOURCE" ]; do
 done
 ROOT="$( cd -P "$( dirname "$SOURCE" )" >/dev/null 2>&1 && pwd )"
 
-# Ensure user settings have Spaces and Resource Optimization enabled
-USER_SETTINGS="$HOME/.vscode-oss-dev/data/User/settings.json"
-mkdir -p "$(dirname "$USER_SETTINGS")"
-if [ ! -f "$USER_SETTINGS" ]; then
-    cat << 'EOF' > "$USER_SETTINGS"
+# Ensure user settings have Spaces settings enabled in both dev paths
+for USER_SETTINGS in "$HOME/Library/Application Support/code-oss-dev/User/settings.json" "$HOME/.vscode-oss-dev/data/User/settings.json"; do
+	mkdir -p "$(dirname "$USER_SETTINGS")"
+	if [ ! -f "$USER_SETTINGS" ] || [ "$(cat "$USER_SETTINGS" 2>/dev/null)" = "{}" ] || [ ! -s "$USER_SETTINGS" ]; then
+		cat << 'EOF' > "$USER_SETTINGS"
 {
 	"workbench.experimental.spaces.enabled": true,
-	"workbench.experimental.spaces.resourceOptimization": true
+	"workbench.experimental.spaces.resourceOptimization": true,
+	"workbench.experimental.spaces.autoAdoptWindows": true,
+	"workbench.experimental.spaces.restoreOnStartup": true,
+	"workbench.experimental.spaces.focusEditorOnSwitch": true,
+	"workbench.experimental.spaces.refreshTerminalsOnSwitch": true
 }
 EOF
-fi
+	fi
+done
 
 exec "$ROOT/scripts/code.sh" "$@"

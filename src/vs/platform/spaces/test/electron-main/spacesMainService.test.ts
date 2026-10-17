@@ -534,14 +534,12 @@ suite('SpacesMainService', () => {
 		// Switch back to Space A
 		await service.switchToSpace(b.id, spaceA.id);
 
-		// B should be hibernated (throttling true, frame rate 1, state inactive message)
+		// B should be hibernated (throttling true, state inactive message)
 		assert.ok(b.win.webContents.throttlingCalls.includes(true), 'B should be background-throttled');
-		assert.ok(b.win.webContents.frameRateCalls.includes(1), 'B should be throttled to 1 FPS');
 		assert.ok(b.sentMessages.some(m => m.channel === 'vscode:spaces:stateChange' && (m.args[0] as any)?.state === 'inactive'), 'B should receive inactive stateChange');
 
-		// A should be awakened (throttling false, frame rate 120, state active message)
+		// A should be awakened (throttling false, state active message)
 		assert.ok(a.win.webContents.throttlingCalls.includes(false), 'A should have background throttling disabled');
-		assert.ok(a.win.webContents.frameRateCalls.includes(120), 'A should have 120 FPS restored');
 		assert.ok(a.sentMessages.some(m => m.channel === 'vscode:spaces:stateChange' && (m.args[0] as any)?.state === 'active'), 'A should receive active stateChange');
 	});
 

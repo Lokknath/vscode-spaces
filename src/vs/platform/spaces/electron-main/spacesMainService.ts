@@ -353,16 +353,10 @@ export class SpacesMainService extends Disposable implements ISpacesMainService 
 
 		try {
 			// 1. Enable Chromium background throttling for hidden window
-			win.webContents.setBackgroundThrottling(true);
+			win.webContents.setBackgroundThrottling?.(true);
 
-			// 2. Reduce target frame rate to minimum (1 FPS)
-			win.webContents.setFrameRate(1);
-
-			// 3. Notify renderer to pause animations and switch xterm to headless buffer
+			// 2. Notify renderer to pause animations and switch xterm to headless buffer
 			window.send('vscode:spaces:stateChange', { state: 'inactive' });
-
-			// 4. Trigger V8 memory compaction
-			(win.webContents as any).cleanUpLeakedPersistentId?.();
 		} catch (error) {
 			this.logService.warn(`[spaces] failed to hibernate window ${window.id}`, error);
 		}
@@ -375,9 +369,8 @@ export class SpacesMainService extends Disposable implements ISpacesMainService 
 		}
 
 		try {
-			// 1. Restore normal background throttling and frame rate
-			win.webContents.setBackgroundThrottling(false);
-			win.webContents.setFrameRate(120);
+			// 1. Restore normal background throttling
+			win.webContents.setBackgroundThrottling?.(false);
 
 			// 2. Notify renderer to resume animations and active xterm rendering
 			window.send('vscode:spaces:stateChange', { state: 'active' });
