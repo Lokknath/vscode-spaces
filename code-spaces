@@ -6,13 +6,19 @@
 #   ./code-spaces <folder>    # Launch with a specific repository folder
 
 export VSCODE_SKIP_NODE_VERSION_CHECK=1
+export VSCODE_SKIP_PRELAUNCH=1
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 
 # Ensure user settings have Spaces and Resource Optimization enabled
-USER_SETTINGS="$HOME/Library/Application Support/Code - OSS/User/settings.json"
+USER_SETTINGS="$HOME/.vscode-oss-dev/data/User/settings.json"
 mkdir -p "$(dirname "$USER_SETTINGS")"
 if [ ! -f "$USER_SETTINGS" ]; then
-    echo -e "{\n\t\"workbench.experimental.spaces.enabled\": true,\n\t\"workbench.experimental.spaces.resourceOptimization\": true\n}" > "$USER_SETTINGS"
+    cat << 'EOF' > "$USER_SETTINGS"
+{
+	"workbench.experimental.spaces.enabled": true,
+	"workbench.experimental.spaces.resourceOptimization": true
+}
+EOF
 fi
 
 exec "$ROOT/scripts/code.sh" "$@"
