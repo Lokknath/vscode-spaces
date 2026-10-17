@@ -18,6 +18,10 @@ import { createDecorator } from '../../instantiation/common/instantiation.js';
 
 export const SPACES_ENABLED_SETTING = 'workbench.experimental.spaces.enabled';
 export const SPACES_RESOURCE_OPTIMIZATION_SETTING = 'workbench.experimental.spaces.resourceOptimization';
+export const SPACES_AUTO_ADOPT_SETTING = 'workbench.experimental.spaces.autoAdoptWindows';
+export const SPACES_RESTORE_ON_STARTUP_SETTING = 'workbench.experimental.spaces.restoreOnStartup';
+export const SPACES_FOCUS_EDITOR_SETTING = 'workbench.experimental.spaces.focusEditorOnSwitch';
+export const SPACES_REFRESH_TERMINALS_SETTING = 'workbench.experimental.spaces.refreshTerminalsOnSwitch';
 
 export const SPACES_CHANNEL_NAME = 'spaces';
 

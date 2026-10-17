@@ -17,9 +17,34 @@ import { NullLogService } from '../../../log/common/log.js';
 import { FocusMode } from '../../../native/common/native.js';
 import { ILoadEvent, LoadReason } from '../../../window/electron-main/window.js';
 import { IOpenConfiguration, IWindowsMainService } from '../../../windows/electron-main/windows.js';
+import { IStateService } from '../../../state/node/state.js';
 import { ISingleFolderWorkspaceIdentifier } from '../../../workspace/common/workspace.js';
-import { ISpace, ISpacesSnapshot, SpaceOperationResult } from '../../common/spaces.js';
+import { ISpace, ISpacesSnapshot, SPACES_AUTO_ADOPT_SETTING, SPACES_RESTORE_ON_STARTUP_SETTING, SpaceOperationResult } from '../../common/spaces.js';
 import { SpacesMainService } from '../../electron-main/spacesMainService.js';
+
+class FakeStateService implements IStateService {
+	declare readonly _serviceBrand: undefined;
+	readonly storage = new Map<string, any>();
+	getItem<T>(key: string, defaultValue?: T): T | undefined {
+		return this.storage.has(key) ? this.storage.get(key) : defaultValue;
+	}
+	setItem(key: string, data?: any): void {
+		if (data === undefined) {
+			this.storage.delete(key);
+		} else {
+			this.storage.set(key, data);
+		}
+	}
+	setItems(items: readonly { key: string; data?: any }[]): void {
+		for (const item of items) {
+			this.setItem(item.key, item.data);
+		}
+	}
+	removeItem(key: string): void {
+		this.storage.delete(key);
+	}
+	async close(): Promise<void> {}
+}
 
 interface IBounds { x: number; y: number; width: number; height: number }
 
@@ -214,6 +239,8 @@ suite('SpacesMainService', () => {
 	let windowsMainService: FakeWindowsMainService;
 	let auxiliaryWindows: FakeAuxiliaryWindow[];
 	let lifecycleMainService: { quitRequested: boolean };
+	let configurationService: TestConfigurationService;
+	let stateService: FakeStateService;
 	let service: SpacesMainService;
 	let changes: ISpacesSnapshot[];
 
@@ -222,14 +249,17 @@ suite('SpacesMainService', () => {
 		auxiliaryWindows = [];
 		lifecycleMainService = { quitRequested: false };
 		changes = [];
+		configurationService = new TestConfigurationService();
+		stateService = new FakeStateService();
 
 		service = store.add(new SpacesMainService(
 			windowsMainService as unknown as IWindowsMainService,
 			{ getWindows: () => auxiliaryWindows } as unknown as IAuxiliaryWindowsMainService,
 			{ args: { _: [] } } as unknown as IEnvironmentMainService,
 			lifecycleMainService as unknown as ILifecycleMainService,
-			new TestConfigurationService(),
-			new NullLogService()
+			configurationService,
+			new NullLogService(),
+			stateService
 		));
 		store.add(service.onDidChangeSpaces(snapshot => changes.push(snapshot)));
 	});
@@ -513,5 +543,51 @@ suite('SpacesMainService', () => {
 		assert.ok(a.win.webContents.throttlingCalls.includes(false), 'A should have background throttling disabled');
 		assert.ok(a.win.webContents.frameRateCalls.includes(120), 'A should have 120 FPS restored');
 		assert.ok(a.sentMessages.some(m => m.channel === 'vscode:spaces:stateChange' && (m.args[0] as any)?.state === 'active'), 'A should receive active stateChange');
+	});
+
+	test('auto-adopts new windows when autoAdoptWindows setting is enabled', async () => {
+		await configurationService.setUserConfiguration(SPACES_AUTO_ADOPT_SETTING, true);
+
+		const a = windowsMainService.createWindow(1, '/work/project-a');
+		const b = windowsMainService.createWindow(2, '/work/project-b');
+
+		const snapshot = await service.getSpaces(undefined);
+		assert.strictEqual(snapshot.spaces.length, 2);
+		assert.deepStrictEqual(snapshot.spaces.map(s => s.name), ['project-a', 'project-b']);
+		assert.strictEqual(snapshot.activeSpaceId, snapshot.spaces[1].id);
+		assert.strictEqual(b.win.visible, true);
+		assert.strictEqual(a.win.visible, false);
+	});
+
+	test('persists spaces state and restores saved spaces on startup', async () => {
+		const { a, b } = await createTwoSpaces();
+		const saved = stateService.getItem<any>('spaces.state');
+		assert.ok(saved);
+		assert.strictEqual(saved.spaces.length, 2);
+		assert.strictEqual(saved.spaces[1].isActive, true);
+
+		// Simulate fresh service startup with restoreOnStartup enabled
+		const restoreConfig = new TestConfigurationService();
+		await restoreConfig.setUserConfiguration(SPACES_RESTORE_ON_STARTUP_SETTING, true);
+		const restoreWindowsMainService = new FakeWindowsMainService(store);
+		const restoreService = store.add(new SpacesMainService(
+			restoreWindowsMainService as unknown as IWindowsMainService,
+			{ getWindows: () => [] } as unknown as IAuxiliaryWindowsMainService,
+			{ args: { _: [] } } as unknown as IEnvironmentMainService,
+			lifecycleMainService as unknown as ILifecycleMainService,
+			restoreConfig,
+			new NullLogService(),
+			stateService
+		));
+
+		// Window 2 (active) and Window 1 (inactive) restored by VS Code on startup
+		const win2 = restoreWindowsMainService.createWindow(2, '/work/project-b');
+		const win1 = restoreWindowsMainService.createWindow(1, '/work/project-a');
+
+		const restoreSnapshot = await restoreService.getSpaces(undefined);
+		assert.strictEqual(restoreSnapshot.spaces.length, 2);
+		assert.strictEqual(restoreSnapshot.activeSpaceId, restoreSnapshot.spaces[0].id);
+		assert.strictEqual(win2.win.visible, true);
+		assert.strictEqual(win1.win.visible, false);
 	});
 });

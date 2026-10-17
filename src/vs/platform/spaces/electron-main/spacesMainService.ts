@@ -18,8 +18,9 @@ import { ILogService } from '../../log/common/log.js';
 import { useNativeFullScreen } from '../../window/common/window.js';
 import { ICodeWindow } from '../../window/electron-main/window.js';
 import { IWindowsMainService, OpenContext } from '../../windows/electron-main/windows.js';
-import { ISingleFolderWorkspaceIdentifier, isSingleFolderWorkspaceIdentifier, isWorkspaceIdentifier, IWorkspaceIdentifier } from '../../workspace/common/workspace.js';
-import { ICommonSpacesService, ISpaceOperationResult, ISpacesSnapshot, ISpaceWorkspace, SpaceOperationResult } from '../common/spaces.js';
+import { IStateService } from '../../state/node/state.js';
+import { ISingleFolderWorkspaceIdentifier, IWorkspaceIdentifier, isSingleFolderWorkspaceIdentifier, isWorkspaceIdentifier } from '../../workspace/common/workspace.js';
+import { ICommonSpacesService, ISpaceOperationResult, ISpacesSnapshot, ISpaceWorkspace, SPACES_AUTO_ADOPT_SETTING, SPACES_RESTORE_ON_STARTUP_SETTING, SpaceOperationResult } from '../common/spaces.js';
 import { SpacesModel } from '../common/spacesModel.js';
 
 export const ISpacesMainService = createDecorator<ISpacesMainService>('spacesMainService');
@@ -30,6 +31,19 @@ interface ISpaceFrame {
 	readonly bounds: electron.Rectangle;
 	readonly maximized: boolean;
 }
+
+interface IPersistedSpaceEntry {
+	readonly name: string;
+	readonly workspace?: { readonly kind: 'folder' | 'workspace'; readonly uri: UriComponents };
+	readonly isActive?: boolean;
+}
+
+interface IPersistedSpacesState {
+	readonly spaces: readonly IPersistedSpaceEntry[];
+	readonly lastFrame?: ISpaceFrame;
+}
+
+const SPACES_STATE_KEY = 'spaces.state';
 
 /**
  * Hosts Spaces as regular code windows that share one on-screen frame:
@@ -71,11 +85,15 @@ export class SpacesMainService extends Disposable implements ISpacesMainService 
 		@IEnvironmentMainService private readonly environmentMainService: IEnvironmentMainService,
 		@ILifecycleMainService private readonly lifecycleMainService: ILifecycleMainService,
 		@IConfigurationService private readonly configurationService: IConfigurationService,
-		@ILogService private readonly logService: ILogService
+		@ILogService private readonly logService: ILogService,
+		@IStateService private readonly stateService?: IStateService
 	) {
 		super();
 
-		this._register(this.model.onDidChange(() => this._onDidChangeSpaces.fire(this.model.snapshot())));
+		this._register(this.model.onDidChange(() => {
+			this._onDidChangeSpaces.fire(this.model.snapshot());
+			this.persistSpacesState();
+		}));
 		this._register(this.windowsMainService.onDidOpenWindow(window => this.onDidOpenWindow(window)));
 	}
 
@@ -416,27 +434,114 @@ export class SpacesMainService extends Disposable implements ISpacesMainService 
 	private onDidOpenWindow(window: ICodeWindow): void {
 		const destroyed = this.destroyedSpace;
 		this.destroyedSpace = undefined;
-		if (!destroyed || !this.isSupportedWindow(window)) {
-			return;
-		}
+		if (destroyed && this.isSupportedWindow(window)) {
+			const space = this.model.getSpace(destroyed.spaceId);
+			if (space && space.windowId === destroyed.windowId) {
+				this.windowListeners.deleteAndDispose(destroyed.windowId);
+				this.hiddenAuxiliaryWindows.delete(destroyed.windowId);
+				this.model.rebindWindow(space.id, window.id);
+				this.registerWindowListeners(window, space.id);
+				this.logService.info(`[spaces] Space '${space.name}' (${space.id}) moved from crashed window ${destroyed.windowId} to window ${window.id}`);
 
-		const space = this.model.getSpace(destroyed.spaceId);
-		if (!space || space.windowId !== destroyed.windowId) {
-			return;
-		}
-
-		this.windowListeners.deleteAndDispose(destroyed.windowId);
-		this.hiddenAuxiliaryWindows.delete(destroyed.windowId);
-		this.model.rebindWindow(space.id, window.id);
-		this.registerWindowListeners(window, space.id);
-		this.logService.info(`[spaces] Space '${space.name}' (${space.id}) moved from crashed window ${destroyed.windowId} to window ${window.id}`);
-
-		if (space.state === 'active') {
-			if (destroyed.frame && window.win) {
-				applyFrame(window.win, destroyed.frame);
+				if (space.state === 'active') {
+					if (destroyed.frame && window.win) {
+						applyFrame(window.win, destroyed.frame);
+					}
+				} else {
+					this.activate(space.id); // the replacement window opens visible
+				}
+				return;
 			}
-		} else {
-			this.activate(space.id); // the replacement window opens visible
+		}
+
+		if (!this.isSupportedWindow(window)) {
+			return;
+		}
+
+		if (this.model.getSpaceByWindowId(window.id)) {
+			return;
+		}
+
+		const restoreOnStartup = this.configurationService.getValue<boolean>(SPACES_RESTORE_ON_STARTUP_SETTING) === true;
+		const autoAdopt = this.configurationService.getValue<boolean>(SPACES_AUTO_ADOPT_SETTING) === true;
+
+		if (!restoreOnStartup && !autoAdopt) {
+			return;
+		}
+
+		this.tryAdoptOrRestoreWindow(window, autoAdopt, restoreOnStartup);
+	}
+
+	private tryAdoptOrRestoreWindow(window: ICodeWindow, autoAdopt: boolean, restoreOnStartup: boolean): void {
+		const currentSnapshot = this.model.snapshot();
+		const savedState = restoreOnStartup ? this.stateService?.getItem<IPersistedSpacesState>(SPACES_STATE_KEY) : undefined;
+		const windowWorkspace = toSpaceWorkspace(window.openedWorkspace);
+
+		if (savedState && savedState.spaces.length > 0) {
+			const savedEntry = savedState.spaces.find(entry => {
+				if (!entry.workspace || !windowWorkspace) {
+					return false;
+				}
+				return entry.workspace.kind === windowWorkspace.kind &&
+					URI.revive(entry.workspace.uri).toString() === windowWorkspace.uri.toString();
+			});
+
+			if (savedEntry) {
+				if (savedEntry.isActive || currentSnapshot.spaces.length === 0) {
+					const space = this.adopt(window);
+					if (savedState.lastFrame && window.win && !savedState.lastFrame.maximized) {
+						applyFrame(window.win, savedState.lastFrame);
+					}
+					this.activate(space.id, { keepTargetFrame: !savedState.lastFrame });
+				} else {
+					this.adopt(window);
+					const activeWin = this.getActiveSpaceWindow()?.win;
+					if (activeWin && !activeWin.isDestroyed() && window.win && !window.win.isDestroyed()) {
+						applyFrame(window.win, captureFrame(activeWin));
+						window.win.hide();
+						this.hibernateSpace(window);
+					}
+				}
+				return;
+			}
+		}
+
+		if (autoAdopt) {
+			if (currentSnapshot.spaces.length === 0) {
+				this.adoptAsActiveSpace(window);
+			} else {
+				const space = this.adopt(window);
+				this.activate(space.id);
+			}
+		}
+	}
+
+	private persistSpacesState(): void {
+		if (!this.stateService) {
+			return;
+		}
+
+		try {
+			const snapshot = this.model.snapshot();
+			if (snapshot.spaces.length === 0) {
+				this.stateService.removeItem(SPACES_STATE_KEY);
+				return;
+			}
+
+			const spaces: IPersistedSpaceEntry[] = snapshot.spaces.map(space => ({
+				name: space.name,
+				workspace: space.workspace ? { kind: space.workspace.kind, uri: space.workspace.uri.toJSON() } : undefined,
+				isActive: space.id === snapshot.activeSpaceId
+			}));
+
+			const state: IPersistedSpacesState = {
+				spaces,
+				lastFrame: this.lastFrame
+			};
+
+			this.stateService.setItem(SPACES_STATE_KEY, state);
+		} catch (error) {
+			this.logService.warn('[spaces] failed to persist spaces state', error);
 		}
 	}
 

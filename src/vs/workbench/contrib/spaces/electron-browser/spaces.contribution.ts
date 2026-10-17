@@ -21,7 +21,9 @@ import { IHoverService } from '../../../../platform/hover/browser/hover.js';
 import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
 import { INativeHostService } from '../../../../platform/native/common/native.js';
 import { Registry } from '../../../../platform/registry/common/platform.js';
-import { ISpace, ISpacesService, ISpacesSnapshot, SPACES_ENABLED_SETTING, SPACES_RESOURCE_OPTIMIZATION_SETTING } from '../../../../platform/spaces/common/spaces.js';
+import { ipcRenderer } from '../../../../base/parts/sandbox/electron-browser/globals.js';
+import { IEditorGroupsService } from '../../../services/editor/common/editorGroupsService.js';
+import { ISpace, ISpacesService, ISpacesSnapshot, SPACES_AUTO_ADOPT_SETTING, SPACES_ENABLED_SETTING, SPACES_FOCUS_EDITOR_SETTING, SPACES_REFRESH_TERMINALS_SETTING, SPACES_RESOURCE_OPTIMIZATION_SETTING, SPACES_RESTORE_ON_STARTUP_SETTING } from '../../../../platform/spaces/common/spaces.js';
 import { ITerminalInstance, ITerminalService } from '../../terminal/browser/terminal.js';
 import { TerminalStatus } from '../../terminal/browser/terminalStatusList.js';
 import { workbenchConfigurationNodeBase } from '../../../common/configuration.js';
@@ -38,7 +40,7 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).regis
 	properties: {
 		[SPACES_ENABLED_SETTING]: {
 			type: 'boolean',
-			default: false,
+			default: true,
 			tags: ['experimental'],
 			markdownDescription: localize('spaces.enabled', "Enables Spaces: several fully independent windows (own workspace, extension host, terminals and state) hosted behind one window frame. Switching Spaces keeps inactive Spaces running.")
 		},
@@ -47,6 +49,30 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).regis
 			default: true,
 			tags: ['experimental'],
 			markdownDescription: localize('spaces.resourceOptimization', "Optimizes resource consumption of inactive Spaces by suspending GPU compositing, pausing animations, and trimming idle V8 memory.")
+		},
+		[SPACES_AUTO_ADOPT_SETTING]: {
+			type: 'boolean',
+			default: true,
+			tags: ['experimental'],
+			markdownDescription: localize('spaces.autoAdoptWindows', "Automatically adopts newly opened workspace windows (from CLI or file dialogs) into the Spaces frame.")
+		},
+		[SPACES_RESTORE_ON_STARTUP_SETTING]: {
+			type: 'boolean',
+			default: true,
+			tags: ['experimental'],
+			markdownDescription: localize('spaces.restoreOnStartup', "Automatically restores previous Spaces and keeps them grouped behind the same frame across application restarts.")
+		},
+		[SPACES_FOCUS_EDITOR_SETTING]: {
+			type: 'boolean',
+			default: true,
+			tags: ['experimental'],
+			markdownDescription: localize('spaces.focusEditorOnSwitch', "Automatically restores focus to the active editor group when switching between Spaces.")
+		},
+		[SPACES_REFRESH_TERMINALS_SETTING]: {
+			type: 'boolean',
+			default: true,
+			tags: ['experimental'],
+			markdownDescription: localize('spaces.refreshTerminalsOnSwitch', "Automatically refreshes and re-layouts terminal viewports when switching Spaces to cleanly display output accumulated in the background.")
 		}
 	}
 });
@@ -174,7 +200,8 @@ class SpacesStatusContribution extends Disposable implements IWorkbenchContribut
 		@IConfigurationService private readonly configurationService: IConfigurationService,
 		@ILifecycleService private readonly lifecycleService: ILifecycleService,
 		@IDialogService private readonly dialogService: IDialogService,
-		@ITerminalService private readonly terminalService: ITerminalService
+		@ITerminalService private readonly terminalService: ITerminalService,
+		@IEditorGroupsService private readonly editorGroupsService: IEditorGroupsService
 	) {
 		super();
 
@@ -206,6 +233,13 @@ class SpacesStatusContribution extends Disposable implements IWorkbenchContribut
 
 		store.add(this.spacesService.onDidChangeSpaces(snapshot => this.updateStatus(snapshot)));
 		this.spacesService.getSpaces().then(snapshot => this.updateStatus(snapshot));
+
+		// Hook direct stateChange IPC from main process for zero-latency awakening
+		const onStateChange = (_event: unknown, data: { state: string }) => {
+			this.handleStateChange(data.state === 'active');
+		};
+		ipcRenderer.on('vscode:spaces:stateChange', onStateChange);
+		store.add({ dispose: () => ipcRenderer.removeListener('vscode:spaces:stateChange', onStateChange) });
 
 		// Hook terminal bell & agent attention needed when inactive
 		const hookTerminal = (instance: ITerminalInstance) => {
@@ -240,6 +274,31 @@ class SpacesStatusContribution extends Disposable implements IWorkbenchContribut
 		}));
 	}
 
+	private handleStateChange(isActive: boolean): void {
+		const optimizationEnabled = this.configurationService.getValue<boolean>(SPACES_RESOURCE_OPTIMIZATION_SETTING) ?? true;
+		document.body.classList.toggle('spaces-inactive', !isActive && optimizationEnabled);
+
+		if (isActive) {
+			// Refresh terminals so background output from AI agents or builds is cleanly rendered
+			if (this.configurationService.getValue<boolean>(SPACES_REFRESH_TERMINALS_SETTING) ?? true) {
+				for (const instance of this.terminalService.instances) {
+					if (instance.isVisible) {
+						const lastDimensions = (instance as any)._lastLayoutDimensions;
+						if (lastDimensions) {
+							instance.layout(lastDimensions);
+						}
+						(instance as any).xterm?.refresh?.();
+					}
+				}
+			}
+
+			// Restore focus to active editor
+			if (this.configurationService.getValue<boolean>(SPACES_FOCUS_EDITOR_SETTING) ?? true) {
+				this.editorGroupsService.activeGroup?.focus();
+			}
+		}
+	}
+
 	private updateStatus(snapshot: ISpacesSnapshot): void {
 		if (!this.enablementListeners.value) {
 			return;
@@ -249,8 +308,7 @@ class SpacesStatusContribution extends Disposable implements IWorkbenchContribut
 
 		const current = getCurrentSpace(snapshot, this.nativeHostService.windowId);
 		const isInactive = current?.state === 'inactive';
-		const optimizationEnabled = this.configurationService.getValue<boolean>(SPACES_RESOURCE_OPTIMIZATION_SETTING) ?? true;
-		document.body.classList.toggle('spaces-inactive', isInactive && optimizationEnabled);
+		this.handleStateChange(!isInactive);
 
 		const attentionCount = getAttentionCount(snapshot);
 		const text = attentionCount > 0
