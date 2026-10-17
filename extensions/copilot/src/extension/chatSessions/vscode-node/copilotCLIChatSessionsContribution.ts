@@ -266,22 +266,28 @@ export class CopilotCLIChatSessionItemProvider extends Disposable implements vsc
 	}
 
 	public async provideChatSessionItems(token: vscode.CancellationToken): Promise<vscode.ChatSessionItem[]> {
-		const stopwatch = new StopWatch();
-		const sessions = await this.copilotcliSessionService.getAllSessions(token);
-		// Drain the pending set: sessions that were explicitly refreshed get `changes` populated
-		// eagerly so the visible row reflects the latest diff info on this re-provide pass.
-		const pendingIds = new Set(this.pendingChangeIncludeIds);
-		this.pendingChangeIncludeIds.clear();
-		const diskSessions = await Promise.all(sessions.map(async session => this.toChatSessionItem(
-			session,
-			pendingIds.has(session.id) ? { includeChanges: true } : undefined,
-			token,
-		)));
+		try {
+			const stopwatch = new StopWatch();
+			const sessions = await this.copilotcliSessionService.getAllSessions(token);
+			// Drain the pending set: sessions that were explicitly refreshed get `changes` populated
+			// eagerly so the visible row reflects the latest diff info on this re-provide pass.
+			const pendingIds = new Set(this.pendingChangeIncludeIds);
+			this.pendingChangeIncludeIds.clear();
+			const diskSessions = await Promise.all(sessions.map(async session => this.toChatSessionItem(
+				session,
+				pendingIds.has(session.id) ? { includeChanges: true } : undefined,
+				token,
+			)));
 
-		const count = diskSessions.length;
-		void this.commandExecutionService.executeCommand('setContext', 'github.copilot.chat.cliSessionsEmpty', count === 0);
-		this.logService.info(`[CopilotCLIChatSessionContentProvider] listSessions took ${stopwatch.elapsed()}ms`);
-		return diskSessions;
+			const count = diskSessions.length;
+			void this.commandExecutionService.executeCommand('setContext', 'github.copilot.chat.cliSessionsEmpty', count === 0);
+			this.logService.info(`[CopilotCLIChatSessionContentProvider] listSessions took ${stopwatch.elapsed()}ms`);
+			return diskSessions;
+		} catch (error) {
+			this.logService.warn(`[CopilotCLIChatSessionContentProvider] Failed to list CLI sessions: ${error}`);
+			void this.commandExecutionService.executeCommand('setContext', 'github.copilot.chat.cliSessionsEmpty', true);
+			return [];
+		}
 	}
 
 	private shouldShowBadge(): boolean {

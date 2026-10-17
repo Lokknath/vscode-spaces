@@ -12,14 +12,19 @@ import { localize, localize2 } from '../../../../nls.js';
 import { Action2, MenuId } from '../../../../platform/actions/common/actions.js';
 import { ICommandService } from '../../../../platform/commands/common/commands.js';
 import { ContextKeyExpr } from '../../../../platform/contextkey/common/contextkey.js';
+import { KeyCode, KeyMod } from '../../../../base/common/keyCodes.js';
+import { basename } from '../../../../base/common/resources.js';
 import { IFileDialogService } from '../../../../platform/dialogs/common/dialogs.js';
+import { IFileService } from '../../../../platform/files/common/files.js';
 import { ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
+import { KeybindingWeight } from '../../../../platform/keybinding/common/keybindingsRegistry.js';
 import { ILabelService } from '../../../../platform/label/common/label.js';
 import { INativeHostService } from '../../../../platform/native/common/native.js';
 import { INotificationService } from '../../../../platform/notification/common/notification.js';
 import { IQuickInputButton, IQuickInputService, IQuickPickItem, IQuickPickSeparator } from '../../../../platform/quickinput/common/quickInput.js';
 import { ISpace, ISpaceOperationResult, ISpacesService, SPACES_ENABLED_SETTING, SpaceOperationResult } from '../../../../platform/spaces/common/spaces.js';
 import { WORKSPACE_FILTER } from '../../../../platform/workspace/common/workspace.js';
+import { ITerminalService } from '../../terminal/browser/terminal.js';
 
 export const SPACES_CATEGORY = localize2('spaces', "Spaces");
 
@@ -34,7 +39,20 @@ export const enum SpacesCommandId {
 	CloseCurrentSpace = 'workbench.action.spaces.closeCurrentSpace',
 	RenameCurrentSpace = 'workbench.action.spaces.renameCurrentSpace',
 	ListSpaces = 'workbench.action.spaces.listSpaces',
-	TitleBarPicker = 'workbench.action.spaces.titleBarPicker'
+	TitleBarPicker = 'workbench.action.spaces.titleBarPicker',
+	OpenRemoteSSHSpace = 'workbench.action.spaces.openRemoteSSHSpace',
+	OpenOnGitHub = 'workbench.action.spaces.openOnGitHub',
+	CreatePullRequest = 'workbench.action.spaces.createPullRequest',
+	CreateWorktreeSpace = 'workbench.action.spaces.createWorktreeSpace',
+	SwitchToSpace1 = 'workbench.action.spaces.switchToSpace1',
+	SwitchToSpace2 = 'workbench.action.spaces.switchToSpace2',
+	SwitchToSpace3 = 'workbench.action.spaces.switchToSpace3',
+	SwitchToSpace4 = 'workbench.action.spaces.switchToSpace4',
+	SwitchToSpace5 = 'workbench.action.spaces.switchToSpace5',
+	SwitchToSpace6 = 'workbench.action.spaces.switchToSpace6',
+	SwitchToSpace7 = 'workbench.action.spaces.switchToSpace7',
+	SwitchToSpace8 = 'workbench.action.spaces.switchToSpace8',
+	SwitchToSpace9 = 'workbench.action.spaces.switchToSpace9'
 }
 
 function reportResult(notificationService: INotificationService, operation: ISpaceOperationResult): boolean {
@@ -182,7 +200,11 @@ export class SwitchSpaceAction extends Action2 {
 			title: localize2('spaces.switchSpace', "Switch Space..."),
 			category: SPACES_CATEGORY,
 			precondition: SpacesEnabledContext,
-			f1: true
+			f1: true,
+			keybinding: {
+				weight: KeybindingWeight.WorkbenchContrib,
+				primary: KeyMod.CtrlCmd | KeyMod.Alt | KeyCode.KeyS
+			}
 		});
 	}
 
@@ -298,6 +320,260 @@ export class ListSpacesAction extends Action2 {
 	}
 }
 
+export class OpenRemoteSSHSpaceAction extends Action2 {
+	constructor() {
+		super({
+			id: SpacesCommandId.OpenRemoteSSHSpace,
+			title: localize2('spaces.openRemoteSSHSpace', "Open Remote / SSH as New Space..."),
+			category: SPACES_CATEGORY,
+			precondition: SpacesEnabledContext,
+			f1: true
+		});
+	}
+
+	async run(accessor: ServicesAccessor): Promise<void> {
+		const commandService = accessor.get(ICommandService);
+		await commandService.executeCommand('workbench.action.remote.showMenu');
+	}
+}
+
+export class OpenOnGitHubAction extends Action2 {
+	constructor() {
+		super({
+			id: SpacesCommandId.OpenOnGitHub,
+			title: localize2('spaces.openOnGitHub', "Spaces: Open on GitHub"),
+			category: SPACES_CATEGORY,
+			precondition: SpacesEnabledContext,
+			f1: true
+		});
+	}
+
+	async run(accessor: ServicesAccessor): Promise<void> {
+		const spacesService = accessor.get(ISpacesService);
+		const nativeHostService = accessor.get(INativeHostService);
+		const fileService = accessor.get(IFileService);
+		const notificationService = accessor.get(INotificationService);
+
+		const { spaces } = await spacesService.getSpaces();
+		const current = getCurrentSpace(spaces, nativeHostService.windowId);
+		if (!current?.workspace?.uri) {
+			notificationService.info(localize('spaces.noRepoOpen', "No repository folder is open in the current Space."));
+			return;
+		}
+
+		const gitHubUrl = await getGitHubUrlForUri(fileService, current.workspace.uri);
+		if (!gitHubUrl) {
+			notificationService.info(localize('spaces.notGitHubRepo', "The current Space is not linked to a GitHub remote repository."));
+			return;
+		}
+
+		await nativeHostService.openExternal(gitHubUrl);
+	}
+}
+
+export class CreatePullRequestAction extends Action2 {
+	constructor() {
+		super({
+			id: SpacesCommandId.CreatePullRequest,
+			title: localize2('spaces.createPullRequest', "Spaces: Create GitHub Pull Request"),
+			category: SPACES_CATEGORY,
+			precondition: SpacesEnabledContext,
+			f1: true
+		});
+	}
+
+	async run(accessor: ServicesAccessor): Promise<void> {
+		const spacesService = accessor.get(ISpacesService);
+		const nativeHostService = accessor.get(INativeHostService);
+		const fileService = accessor.get(IFileService);
+		const notificationService = accessor.get(INotificationService);
+
+		const { spaces } = await spacesService.getSpaces();
+		const current = getCurrentSpace(spaces, nativeHostService.windowId);
+		if (!current?.workspace?.uri) {
+			notificationService.info(localize('spaces.noRepoOpen', "No repository folder is open in the current Space."));
+			return;
+		}
+
+		const gitHubUrl = await getGitHubUrlForUri(fileService, current.workspace.uri);
+		if (!gitHubUrl) {
+			notificationService.info(localize('spaces.notGitHubRepo', "The current Space is not linked to a GitHub remote repository."));
+			return;
+		}
+
+		const branch = await getGitBranchForUri(fileService, current.workspace.uri);
+		const prUrl = branch && branch !== 'main' && branch !== 'master'
+			? `${gitHubUrl}/compare/${encodeURIComponent(branch)}?expand=1`
+			: `${gitHubUrl}/pulls`;
+
+		await nativeHostService.openExternal(prUrl);
+	}
+}
+
+export class CreateWorktreeSpaceAction extends Action2 {
+	constructor() {
+		super({
+			id: SpacesCommandId.CreateWorktreeSpace,
+			title: localize2('spaces.createWorktreeSpace', "Spaces: Create Space from Git Worktree..."),
+			category: SPACES_CATEGORY,
+			precondition: SpacesEnabledContext,
+			f1: true
+		});
+	}
+
+	async run(accessor: ServicesAccessor): Promise<void> {
+		const spacesService = accessor.get(ISpacesService);
+		const quickInputService = accessor.get(IQuickInputService);
+		const nativeHostService = accessor.get(INativeHostService);
+		const notificationService = accessor.get(INotificationService);
+		const terminalService = accessor.get(ITerminalService);
+
+		const { spaces } = await spacesService.getSpaces();
+		const current = getCurrentSpace(spaces, nativeHostService.windowId);
+		if (!current?.workspace?.uri || current.workspace.uri.scheme !== 'file') {
+			notificationService.info(localize('spaces.worktreeRequiresLocal', "Git Worktrees can only be created from local folder spaces."));
+			return;
+		}
+
+		const branchName = await quickInputService.input({
+			title: localize('spaces.worktreeBranchTitle', "Create Git Worktree Space"),
+			prompt: localize('spaces.worktreeBranchPrompt', "Enter branch name for the new worktree space (e.g. feature-login)"),
+			validateInput: async val => {
+				if (!val || !val.trim()) {
+					return localize('spaces.branchRequired', "Branch name cannot be empty");
+				}
+				if (/\s/.test(val)) {
+					return localize('spaces.branchNoSpaces', "Branch name cannot contain spaces");
+				}
+				return undefined;
+			}
+		});
+
+		if (!branchName) {
+			return;
+		}
+
+		const cleanBranch = branchName.trim();
+		const repoDir = current.workspace.uri.fsPath;
+		const repoName = basename(current.workspace.uri);
+		const parentDir = URI.joinPath(current.workspace.uri, '..').fsPath;
+		const worktreePath = `${parentDir}/${repoName}-${cleanBranch}`;
+
+		try {
+			const terminal = await terminalService.createTerminal({
+				name: `Git Worktree: ${cleanBranch}`,
+				cwd: repoDir
+			});
+			terminalService.setActiveInstance(terminal);
+			terminal.sendText(`git worktree add -b ${cleanBranch} "${worktreePath}" || git worktree add "${worktreePath}" ${cleanBranch}`);
+
+			// Give the worktree command a moment to initiate the directory, then open as space
+			setTimeout(async () => {
+				reportResult(notificationService, await spacesService.openFolderAsSpace(URI.file(worktreePath)));
+			}, 1500);
+		} catch (err: any) {
+			notificationService.error(localize('spaces.worktreeFailed', "Failed to create Git worktree: {0}", err.message));
+		}
+	}
+}
+
+function createSwitchToSpaceAction(index: number) {
+	return class extends Action2 {
+		constructor() {
+			super({
+				id: `workbench.action.spaces.switchToSpace${index}`,
+				title: localize2(`spaces.switchToSpace${index}`, "Switch to Space {0}", index),
+				category: SPACES_CATEGORY,
+				precondition: SpacesEnabledContext,
+				f1: true,
+				keybinding: {
+					weight: KeybindingWeight.WorkbenchContrib,
+					primary: KeyMod.CtrlCmd | KeyMod.Alt | (KeyCode.Digit1 + index - 1)
+				}
+			});
+		}
+
+		async run(accessor: ServicesAccessor): Promise<void> {
+			const spacesService = accessor.get(ISpacesService);
+			const notificationService = accessor.get(INotificationService);
+			const { spaces } = await spacesService.getSpaces();
+			const target = spaces[index - 1];
+			if (target) {
+				reportResult(notificationService, await spacesService.switchToSpace(target.id));
+			}
+		}
+	};
+}
+
+export const SwitchToSpace1Action = createSwitchToSpaceAction(1);
+export const SwitchToSpace2Action = createSwitchToSpaceAction(2);
+export const SwitchToSpace3Action = createSwitchToSpaceAction(3);
+export const SwitchToSpace4Action = createSwitchToSpaceAction(4);
+export const SwitchToSpace5Action = createSwitchToSpaceAction(5);
+export const SwitchToSpace6Action = createSwitchToSpaceAction(6);
+export const SwitchToSpace7Action = createSwitchToSpaceAction(7);
+export const SwitchToSpace8Action = createSwitchToSpaceAction(8);
+export const SwitchToSpace9Action = createSwitchToSpaceAction(9);
+
+export function extractGitHubUrl(gitConfigContent: string): string | undefined {
+	const match = gitConfigContent.match(/url\s*=\s*(?:git@github\.com:|https?:\/\/github\.com\/)([^/\s]+)\/([^\s]+?)(?:\.git)?\s*$/m);
+	if (match) {
+		return `https://github.com/${match[1]}/${match[2]}`;
+	}
+	return undefined;
+}
+
+export function extractGitBranch(headContent: string): string | undefined {
+	const match = headContent.match(/ref:\s*refs\/heads\/(.+)/);
+	return match?.[1]?.trim();
+}
+
+export async function getGitHubUrlForUri(fileService: IFileService, uri: URI): Promise<string | undefined> {
+	try {
+		const configUri = URI.joinPath(uri, '.git', 'config');
+		const content = (await fileService.readFile(configUri)).value.toString();
+		return extractGitHubUrl(content);
+	} catch {
+		try {
+			const dotGitUri = URI.joinPath(uri, '.git');
+			const dotGitContent = (await fileService.readFile(dotGitUri)).value.toString();
+			const gitDirMatch = dotGitContent.match(/gitdir:\s*(.+)/);
+			if (gitDirMatch) {
+				const gitDirPath = gitDirMatch[1].trim();
+				const commonConfigUri = URI.file(gitDirPath + '/config');
+				const configContent = (await fileService.readFile(commonConfigUri)).value.toString();
+				return extractGitHubUrl(configContent);
+			}
+		} catch {
+			// Not a git repository
+		}
+		return undefined;
+	}
+}
+
+export async function getGitBranchForUri(fileService: IFileService, uri: URI): Promise<string | undefined> {
+	try {
+		const headUri = URI.joinPath(uri, '.git', 'HEAD');
+		const content = (await fileService.readFile(headUri)).value.toString();
+		return extractGitBranch(content);
+	} catch {
+		try {
+			const dotGitUri = URI.joinPath(uri, '.git');
+			const dotGitContent = (await fileService.readFile(dotGitUri)).value.toString();
+			const gitDirMatch = dotGitContent.match(/gitdir:\s*(.+)/);
+			if (gitDirMatch) {
+				const gitDirPath = gitDirMatch[1].trim();
+				const headFileUri = URI.file(gitDirPath + '/HEAD');
+				const content = (await fileService.readFile(headFileUri)).value.toString();
+				return extractGitBranch(content);
+			}
+		} catch {
+			// Not a git repository
+		}
+		return undefined;
+	}
+}
+
 async function renameSpace(spacesService: ISpacesService, quickInputService: IQuickInputService, notificationService: INotificationService, space: ISpace, newName?: string): Promise<void> {
 	const name = newName ?? await quickInputService.input({
 		title: localize('spaces.renameTitle', "Rename Space"),
@@ -312,11 +588,12 @@ async function renameSpace(spacesService: ISpacesService, quickInputService: IQu
 
 interface ISpacePickItem extends IQuickPickItem {
 	readonly space?: ISpace;
-	readonly commandId?: SpacesCommandId;
+	readonly commandId?: SpacesCommandId | string;
+	readonly githubUrl?: string;
 }
 
 /**
- * The Spaces dropdown: all Spaces followed by Space management actions.
+ * The Spaces dropdown: all Spaces categorized followed by Space management actions.
  * `manage` mode adds details and inline rename/close buttons.
  */
 async function showSpacesPicker(accessor: ServicesAccessor, mode: 'switch' | 'manage'): Promise<void> {
@@ -326,22 +603,31 @@ async function showSpacesPicker(accessor: ServicesAccessor, mode: 'switch' | 'ma
 	const commandService = accessor.get(ICommandService);
 	const nativeHostService = accessor.get(INativeHostService);
 	const notificationService = accessor.get(INotificationService);
+	const fileService = accessor.get(IFileService);
 
 	const renameButton: IQuickInputButton = { iconClass: ThemeIcon.asClassName(Codicon.edit), tooltip: localize('spaces.renameButton', "Rename Space") };
 	const closeButton: IQuickInputButton = { iconClass: ThemeIcon.asClassName(Codicon.close), tooltip: localize('spaces.closeButton', "Close Space") };
+	const githubButton: IQuickInputButton = { iconClass: ThemeIcon.asClassName(Codicon.github), tooltip: localize('spaces.githubButton', "Open on GitHub") };
 
-	const toItems = (spaces: readonly ISpace[]): Array<ISpacePickItem | IQuickPickSeparator> => {
+	const toItems = (spaces: readonly ISpace[], gitHubUrls: Map<string, string>): Array<ISpacePickItem | IQuickPickSeparator> => {
 		const current = getCurrentSpace(spaces, nativeHostService.windowId);
 		const items: Array<ISpacePickItem | IQuickPickSeparator> = [];
 
-		if (spaces.length > 0) {
-			items.push({ type: 'separator', label: localize('spaces.separator', "Spaces") });
-		}
+		const createSpaceItem = (space: ISpace, isCurrent: boolean): ISpacePickItem => {
+			const ghUrl = gitHubUrls.get(space.id);
+			const buttons: IQuickInputButton[] = [];
+			if (ghUrl) {
+				buttons.push(githubButton);
+			}
+			if (mode === 'manage') {
+				buttons.push(renameButton, closeButton);
+			} else {
+				buttons.push(closeButton);
+			}
 
-		for (const space of spaces) {
-			const isCurrent = space.id === current?.id;
-			items.push({
+			return {
 				space,
+				githubUrl: ghUrl,
 				label: space.needsAttention
 					? `$(${Codicon.bellDot.id}) ${localize('spaces.needsAttention', "{0} — needs attention", space.name)}`
 					: `$(${isCurrent ? Codicon.check.id : Codicon.blank.id}) ${space.name}`,
@@ -349,15 +635,61 @@ async function showSpacesPicker(accessor: ServicesAccessor, mode: 'switch' | 'ma
 				detail: mode === 'manage'
 					? localize('spaces.detailState', "{0} · last active {1}", space.state === 'active' ? localize('spaces.stateActive', "Active") : localize('spaces.stateInactive', "Running in background"), space.lastActiveAt ? new Date(space.lastActiveAt).toLocaleTimeString() : localize('spaces.never', "never"))
 					: undefined,
-				buttons: mode === 'manage' ? [renameButton, closeButton] : [closeButton]
-			});
+				buttons
+			};
+		};
+
+		// Categorized sections: Active, Local, Remote SSH, Worktrees
+		if (current) {
+			items.push({ type: 'separator', label: localize('spaces.activeCategory', "Active Space") });
+			items.push(createSpaceItem(current, true));
 		}
 
-		items.push({ type: 'separator' });
+		const otherSpaces = spaces.filter(s => s.id !== current?.id);
+		const localSpaces: ISpace[] = [];
+		const remoteSpaces: ISpace[] = [];
+		const worktreeSpaces: ISpace[] = [];
+
+		for (const space of otherSpaces) {
+			if (space.workspace?.uri.scheme === 'vscode-remote') {
+				remoteSpaces.push(space);
+			} else if (space.workspace && (space.name.includes('[worktree') || space.workspace.uri.fsPath.includes('-worktree-') || space.workspace.uri.fsPath.includes('.worktrees'))) {
+				worktreeSpaces.push(space);
+			} else {
+				localSpaces.push(space);
+			}
+		}
+
+		if (localSpaces.length > 0) {
+			items.push({ type: 'separator', label: localize('spaces.localCategory', "Local Spaces") });
+			for (const s of localSpaces) {
+				items.push(createSpaceItem(s, false));
+			}
+		}
+
+		if (remoteSpaces.length > 0) {
+			items.push({ type: 'separator', label: localize('spaces.remoteCategory', "Remote SSH Spaces") });
+			for (const s of remoteSpaces) {
+				items.push(createSpaceItem(s, false));
+			}
+		}
+
+		if (worktreeSpaces.length > 0) {
+			items.push({ type: 'separator', label: localize('spaces.worktreeCategory', "Git Worktrees") });
+			for (const s of worktreeSpaces) {
+				items.push(createSpaceItem(s, false));
+			}
+		}
+
+		items.push({ type: 'separator', label: localize('spaces.actionsCategory', "Space Actions") });
 		items.push({ commandId: SpacesCommandId.NewEmptySpace, label: `$(${Codicon.add.id}) ${localize('spaces.pick.new', "New Empty Space")}` });
 		items.push({ commandId: SpacesCommandId.OpenFolderAsNewSpace, label: `$(${Codicon.folderOpened.id}) ${localize('spaces.pick.openFolder', "Open Folder as New Space...")}` });
 		items.push({ commandId: SpacesCommandId.OpenWorkspaceAsNewSpace, label: `$(${Codicon.fileCode.id}) ${localize('spaces.pick.openWorkspace', "Open Workspace as New Space...")}` });
+		items.push({ commandId: SpacesCommandId.OpenRemoteSSHSpace, label: `$(${Codicon.remote.id}) ${localize('spaces.pick.openRemoteSSH', "Open Remote / SSH as New Space...")}` });
+		items.push({ commandId: SpacesCommandId.CreateWorktreeSpace, label: `$(${Codicon.gitFork.id}) ${localize('spaces.pick.createWorktree', "Create Space from Git Worktree...")}` });
 		if (current) {
+			items.push({ commandId: SpacesCommandId.OpenOnGitHub, label: `$(${Codicon.github.id}) ${localize('spaces.pick.openOnGitHub', "Open Active Space on GitHub")}` });
+			items.push({ commandId: SpacesCommandId.CreatePullRequest, label: `$(${Codicon.gitPullRequest.id}) ${localize('spaces.pick.createPR', "Create GitHub Pull Request...")}` });
 			items.push({ commandId: SpacesCommandId.RenameCurrentSpace, label: `$(${Codicon.edit.id}) ${localize('spaces.pick.rename', "Rename Current Space...")}` });
 			items.push({ commandId: SpacesCommandId.CloseCurrentSpace, label: `$(${Codicon.close.id}) ${localize('spaces.pick.close', "Close Current Space")}` });
 		} else {
@@ -376,13 +708,28 @@ async function showSpacesPicker(accessor: ServicesAccessor, mode: 'switch' | 'ma
 	picker.placeholder = localize('spaces.placeholder', "Select a Space to switch to");
 	picker.matchOnDescription = true;
 
+	const resolveGitHubUrls = async (spaces: readonly ISpace[]): Promise<Map<string, string>> => {
+		const map = new Map<string, string>();
+		await Promise.all(spaces.map(async space => {
+			if (space.workspace?.uri) {
+				const url = await getGitHubUrlForUri(fileService, space.workspace.uri);
+				if (url) {
+					map.set(space.id, url);
+				}
+			}
+		}));
+		return map;
+	};
+
 	const snapshot = await spacesService.getSpaces();
-	picker.items = toItems(snapshot.spaces);
+	let gitHubUrls = await resolveGitHubUrls(snapshot.spaces);
+	picker.items = toItems(snapshot.spaces, gitHubUrls);
 	picker.activeItems = picker.items.filter((item): item is ISpacePickItem => item.type !== 'separator' && item.space?.windowId === nativeHostService.windowId);
 
-	disposables.add(spacesService.onDidChangeSpaces(snapshot => {
+	disposables.add(spacesService.onDidChangeSpaces(async newSnapshot => {
 		picker.keepScrollPosition = true;
-		picker.items = toItems(snapshot.spaces);
+		gitHubUrls = await resolveGitHubUrls(newSnapshot.spaces);
+		picker.items = toItems(newSnapshot.spaces, gitHubUrls);
 	}));
 
 	disposables.add(picker.onDidTriggerItemButton(async ({ item, button }) => {
@@ -395,6 +742,8 @@ async function showSpacesPicker(accessor: ServicesAccessor, mode: 'switch' | 'ma
 		} else if (button === renameButton) {
 			picker.hide();
 			await renameSpace(spacesService, quickInputService, notificationService, item.space);
+		} else if (button === githubButton && item.githubUrl) {
+			await nativeHostService.openExternal(item.githubUrl);
 		}
 	}));
 

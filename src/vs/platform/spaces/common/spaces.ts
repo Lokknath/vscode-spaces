@@ -115,11 +115,31 @@ export function getDefaultSpaceName(workspace: ISpaceWorkspace | undefined, empt
 		return localize('emptySpaceName', "Empty Space {0}", emptyIndex);
 	}
 
-	const name = basename(workspace.uri);
+	let name = basename(workspace.uri);
 	if (workspace.kind === 'workspace') {
 		const extension = extname(workspace.uri);
-		return extension ? name.substring(0, name.length - extension.length) : name;
+		if (extension) {
+			name = name.substring(0, name.length - extension.length);
+		}
 	}
 
-	return name || workspace.uri.authority || workspace.uri.toString();
+	if (!name) {
+		name = workspace.uri.authority || workspace.uri.toString();
+	}
+
+	// Smart Host Naming: append [hostname] for remote SSH or other remote spaces
+	if (workspace.uri.scheme === 'vscode-remote' && workspace.uri.authority) {
+		const authority = workspace.uri.authority;
+		if (authority.startsWith('ssh-remote+')) {
+			const host = authority.substring('ssh-remote+'.length);
+			return `${name} [${host}]`;
+		}
+		const plusIndex = authority.indexOf('+');
+		if (plusIndex !== -1) {
+			const host = authority.substring(plusIndex + 1);
+			return `${name} [${host}]`;
+		}
+	}
+
+	return name;
 }

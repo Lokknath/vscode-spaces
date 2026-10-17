@@ -610,26 +610,30 @@ export class CopilotCLISDK implements ICopilotCLISDK {
 	}
 
 	private async initLogger() {
-		const { logger } = await this.getPackage();
-		logger.setLogWriter({
-			outputPath: () => 'na',
-			writeLog: (level, message) => {
-				switch (level) {
-					case 'error':
-						this.logService.error(`[CopilotCLI] ${message}`);
-						break;
-					case 'warning':
-						this.logService.warn(`[CopilotCLI] ${message}`);
-						break;
-					case 'info':
-						this.logService.info(`[CopilotCLI] ${message}`);
-						break;
-					default:
-						this.logService.debug(`[CopilotCLI] ${message}`);
+		try {
+			const { logger } = await this.getPackage();
+			logger.setLogWriter({
+				outputPath: () => 'na',
+				writeLog: (level, message) => {
+					switch (level) {
+						case 'error':
+							this.logService.error(`[CopilotCLI] ${message}`);
+							break;
+						case 'warning':
+							this.logService.warn(`[CopilotCLI] ${message}`);
+							break;
+						case 'info':
+							this.logService.info(`[CopilotCLI] ${message}`);
+							break;
+						default:
+							this.logService.debug(`[CopilotCLI] ${message}`);
+					}
+					return Promise.resolve();
 				}
-				return Promise.resolve();
-			}
-		});
+			});
+		} catch (error) {
+			this.logService.warn(`[CopilotCLI] Failed to initialize logger: ${error}`);
+		}
 	}
 
 	protected async ensureShims(): Promise<void> {

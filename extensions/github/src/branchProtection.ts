@@ -191,7 +191,7 @@ export class GitHubBranchProtectionProvider implements BranchProtectionProvider 
 
 			rulesets.push(...(repository.rulesets?.nodes ?? [])
 				// Active branch ruleset that contains the pull request required rule
-				.filter(node => node && node.target === 'BRANCH' && node.enforcement === 'ACTIVE' && (node.rules?.totalCount ?? 0) > 0) as RepositoryRuleset[]);
+				.filter((node: any) => node && node.target === 'BRANCH' && node.enforcement === 'ACTIVE' && (node.rules?.totalCount ?? 0) > 0) as RepositoryRuleset[]);
 
 			if (repository.rulesets?.pageInfo.hasNextPage) {
 				cursor = repository.rulesets.pageInfo.endCursor as string | undefined;
@@ -230,8 +230,8 @@ export class GitHubBranchProtectionProvider implements BranchProtectionProvider 
 
 				for (const ruleset of repositoryRulesets) {
 					branchProtectionRules.push({
-						include: (ruleset.conditions.refName?.include ?? []).map(r => this.parseRulesetRefName(repositoryDetails, r)),
-						exclude: (ruleset.conditions.refName?.exclude ?? []).map(r => this.parseRulesetRefName(repositoryDetails, r))
+						include: (ruleset.conditions.refName?.include ?? []).map((r: any) => this.parseRulesetRefName(repositoryDetails, r)),
+						exclude: (ruleset.conditions.refName?.exclude ?? []).map((r: any) => this.parseRulesetRefName(repositoryDetails, r))
 					});
 				}
 

@@ -536,8 +536,8 @@ export class CopilotCLISessionService extends Disposable implements ICopilotCLIS
 			allSessions.forEach(session => this._cachedSessionItems.set(session.id, session));
 			return allSessions;
 		} catch (error) {
-			this.logService.error(`Failed to get all sessions: ${error}`);
-			throw error;
+			this.logService.warn(`[CopilotCLISessionService] Failed to get all sessions (returning empty list): ${error}`);
+			return [];
 		} finally {
 			this._isGettingSessions--;
 		}

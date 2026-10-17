@@ -31,7 +31,16 @@ import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase 
 import { ILifecycleService } from '../../../services/lifecycle/common/lifecycle.js';
 import { IStatusbarEntryAccessor, IStatusbarService, StatusbarAlignment } from '../../../services/statusbar/browser/statusbar.js';
 import '../../../services/spaces/electron-browser/spacesService.js';
-import { AddCurrentWindowAsSpaceAction, CloseCurrentSpaceAction, ListSpacesAction, NewEmptySpaceAction, OpenFolderAsNewSpaceAction, OpenWorkspaceAsNewSpaceAction, RenameCurrentSpaceAction, SpacesCommandId, SwitchSpaceAction, TitleBarSpacesPickerAction } from './spacesActions.js';
+import {
+	AddCurrentWindowAsSpaceAction, CloseCurrentSpaceAction, CreatePullRequestAction,
+	CreateWorktreeSpaceAction, ListSpacesAction, NewEmptySpaceAction,
+	OpenFolderAsNewSpaceAction, OpenOnGitHubAction, OpenRemoteSSHSpaceAction,
+	OpenWorkspaceAsNewSpaceAction, RenameCurrentSpaceAction, SpacesCommandId,
+	SwitchSpaceAction, SwitchToSpace1Action, SwitchToSpace2Action,
+	SwitchToSpace3Action, SwitchToSpace4Action, SwitchToSpace5Action,
+	SwitchToSpace6Action, SwitchToSpace7Action, SwitchToSpace8Action,
+	SwitchToSpace9Action, TitleBarSpacesPickerAction
+} from './spacesActions.js';
 
 //#region Configuration
 
@@ -90,6 +99,19 @@ registerAction2(CloseCurrentSpaceAction);
 registerAction2(RenameCurrentSpaceAction);
 registerAction2(ListSpacesAction);
 registerAction2(TitleBarSpacesPickerAction);
+registerAction2(OpenRemoteSSHSpaceAction);
+registerAction2(OpenOnGitHubAction);
+registerAction2(CreatePullRequestAction);
+registerAction2(CreateWorktreeSpaceAction);
+registerAction2(SwitchToSpace1Action);
+registerAction2(SwitchToSpace2Action);
+registerAction2(SwitchToSpace3Action);
+registerAction2(SwitchToSpace4Action);
+registerAction2(SwitchToSpace5Action);
+registerAction2(SwitchToSpace6Action);
+registerAction2(SwitchToSpace7Action);
+registerAction2(SwitchToSpace8Action);
+registerAction2(SwitchToSpace9Action);
 
 //#endregion
 
