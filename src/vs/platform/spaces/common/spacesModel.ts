@@ -12,6 +12,7 @@ import { getDefaultSpaceName, ISpace, ISpacesSnapshot, ISpaceWorkspace } from '.
 export interface ISpaceInit {
 	readonly windowId: number;
 	readonly workspace?: ISpaceWorkspace;
+	readonly customName?: string;
 }
 
 export interface ISpaceActivation {
@@ -94,7 +95,7 @@ export class SpacesModel extends Disposable {
 			windowId: init.windowId,
 			createdAt: this.now(),
 			emptyIndex: init.workspace ? 0 : ++this.emptySpaceCounter,
-			customName: undefined,
+			customName: init.customName,
 			workspace: init.workspace,
 			lastActiveAt: 0,
 			needsAttention: false

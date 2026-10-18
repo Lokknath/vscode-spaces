@@ -78,6 +78,7 @@ export class SpacesMainService extends Disposable implements ISpacesMainService 
 	 * window closes and takes over the Space.
 	 */
 	private destroyedSpace: { readonly spaceId: string; readonly windowId: number; readonly frame: ISpaceFrame | undefined } | undefined;
+	private readonly claimedSavedSpaces = new Set<number>();
 
 	constructor(
 		@IWindowsMainService private readonly windowsMainService: IWindowsMainService,
@@ -240,13 +241,17 @@ export class SpacesMainService extends Disposable implements ISpacesMainService 
 		return this.activate(space.id, { keepTargetFrame: true });
 	}
 
-	private adopt(window: ICodeWindow) {
+	private adopt(window: ICodeWindow, customName?: string) {
 		const existing = this.model.getSpaceByWindowId(window.id);
 		if (existing) {
 			return existing;
 		}
 
-		const space = this.model.add({ windowId: window.id, workspace: toSpaceWorkspace(window.openedWorkspace) });
+		const space = this.model.add({
+			windowId: window.id,
+			workspace: toSpaceWorkspace(window.openedWorkspace),
+			customName
+		});
 		this.logService.info(`[spaces] window ${window.id} added as Space '${space.name}' (${space.id})`);
 
 		this.registerWindowListeners(window, space.id);
@@ -463,63 +468,100 @@ export class SpacesMainService extends Disposable implements ISpacesMainService 
 			return;
 		}
 
-		const restoreOnStartup = this.configurationService.getValue<boolean>(SPACES_RESTORE_ON_STARTUP_SETTING) === true;
-		const autoAdopt = this.configurationService.getValue<boolean>(SPACES_AUTO_ADOPT_SETTING) === true;
-
-		if (!restoreOnStartup && !autoAdopt) {
-			return;
+		// When spaces already exist in this session, immediately hide newly opened secondary windows
+		// so they do not flash on screen or steal focus while waiting for workspace and configuration to load.
+		if (this.model.size > 0 && window.win && !window.win.isDestroyed() && !window.config?.isSessionsWindow) {
+			window.win.hide();
 		}
 
-		this.tryAdoptOrRestoreWindow(window, autoAdopt, restoreOnStartup);
+		const handle = () => {
+			if (!this.isSupportedWindow(window) || this.model.getSpaceByWindowId(window.id)) {
+				return;
+			}
+
+			const restoreOnStartup = this.configurationService.getValue<boolean>(SPACES_RESTORE_ON_STARTUP_SETTING) === true;
+			const autoAdopt = this.configurationService.getValue<boolean>(SPACES_AUTO_ADOPT_SETTING) === true;
+
+			if (!restoreOnStartup && !autoAdopt) {
+				return;
+			}
+
+			this.tryAdoptOrRestoreWindow(window, autoAdopt, restoreOnStartup);
+		};
+
+		if (window.openedWorkspace || window.config) {
+			handle();
+		} else {
+			const disposables = new DisposableStore();
+			disposables.add(Event.once(window.onDidDestroy)(() => disposables.dispose()));
+			disposables.add(Event.once(window.onWillLoad)(() => {
+				disposables.dispose();
+				handle();
+			}));
+		}
 	}
 
 	private tryAdoptOrRestoreWindow(window: ICodeWindow, autoAdopt: boolean, restoreOnStartup: boolean): void {
 		const currentSnapshot = this.model.snapshot();
 		const savedState = restoreOnStartup ? this.stateService?.getItem<IPersistedSpacesState>(SPACES_STATE_KEY) : undefined;
 		const windowWorkspace = toSpaceWorkspace(window.openedWorkspace);
+		const isInitialStartup = !!window.config?.isInitialStartup;
 
-		// Guard: If this is an initial startup, and an empty space already exists, and this window is a duplicate empty window with no unsaved files,
-		// close it to avoid spawning duplicate empty windows and wasting ~500MB RAM.
-		if (!windowWorkspace && currentSnapshot.spaces.some(s => !s.workspace) && window.config?.initialStartup && !window.backupPath) {
-			this.logService.info(`[spaces] closing duplicate empty window ${window.id} on startup`);
-			window.win?.destroy();
-			return;
+		// Guard: If this is an initial startup, and an empty space already exists in the current session,
+		// and this window is a duplicate empty window with no unsaved files (no backupPath),
+		// close it immediately to avoid spawning duplicate empty windows and wasting ~500MB RAM.
+		if (!windowWorkspace && isInitialStartup && !window.backupPath) {
+			const hasEmptySpace = currentSnapshot.spaces.some(s => !s.workspace);
+			const savedEmptyIndex = savedState?.spaces.findIndex((entry, idx) => !entry.workspace && !this.claimedSavedSpaces.has(idx));
+			const savedEmptyEntry = savedEmptyIndex !== undefined && savedEmptyIndex !== -1 ? savedState?.spaces[savedEmptyIndex] : undefined;
+			if (hasEmptySpace && (!savedEmptyEntry || !savedEmptyEntry.isActive)) {
+				this.logService.info(`[spaces] closing duplicate empty window ${window.id} on startup`);
+				window.win?.destroy();
+				return;
+			}
 		}
 
 		if (savedState && savedState.spaces.length > 0) {
-			const savedEntry = savedState.spaces.find(entry => {
-				if (!entry.workspace && !windowWorkspace) {
-					return true; // Match empty spaces!
-				}
-				if (!entry.workspace || !windowWorkspace) {
-					return false;
-				}
-				return entry.workspace.kind === windowWorkspace.kind &&
-					URI.revive(entry.workspace.uri).toString() === windowWorkspace.uri.toString();
-			});
+			let savedEntryIndex = -1;
+			if (windowWorkspace) {
+				savedEntryIndex = savedState.spaces.findIndex((entry, idx) => {
+					if (this.claimedSavedSpaces.has(idx) || !entry.workspace) {
+						return false;
+					}
+					return entry.workspace.kind === windowWorkspace.kind &&
+						URI.revive(entry.workspace.uri).toString() === windowWorkspace.uri.toString();
+				});
+			} else {
+				savedEntryIndex = savedState.spaces.findIndex((entry, idx) => {
+					return !this.claimedSavedSpaces.has(idx) && !entry.workspace;
+				});
+			}
 
-			if (savedEntry) {
-				if (savedEntry.isActive || currentSnapshot.spaces.length === 0) {
-					const space = this.adopt(window);
+			if (savedEntryIndex !== -1) {
+				this.claimedSavedSpaces.add(savedEntryIndex);
+				const savedEntry = savedState.spaces[savedEntryIndex];
+				const space = this.adopt(window, savedEntry.name);
+				const hasExplicitActiveSavedSpace = savedState.spaces.some(s => s.isActive);
+				const shouldActivate = savedEntry.isActive || (!hasExplicitActiveSavedSpace && currentSnapshot.spaces.length === 0);
+
+				if (shouldActivate) {
 					if (savedState.lastFrame && window.win && !savedState.lastFrame.maximized) {
 						applyFrame(window.win, savedState.lastFrame);
 					}
 					this.activate(space.id, { keepTargetFrame: !savedState.lastFrame });
 				} else {
-					this.adopt(window);
 					const activeWin = this.getActiveSpaceWindow()?.win;
 					if (activeWin && !activeWin.isDestroyed() && window.win && !window.win.isDestroyed()) {
 						applyFrame(window.win, captureFrame(activeWin));
-						window.win.hide();
-						this.hibernateSpace(window);
 					}
+					window.win?.hide();
+					this.hibernateSpace(window);
 				}
 				return;
 			}
 		}
 
 		if (autoAdopt) {
-			const isInitialStartup = window.config?.initialStartup;
 			if (currentSnapshot.spaces.length === 0) {
 				this.adoptAsActiveSpace(window);
 			} else if (isInitialStartup) {
@@ -528,9 +570,9 @@ export class SpacesMainService extends Disposable implements ISpacesMainService 
 				const activeWin = this.getActiveSpaceWindow()?.win;
 				if (activeWin && !activeWin.isDestroyed() && window.win && !window.win.isDestroyed()) {
 					applyFrame(window.win, captureFrame(activeWin));
-					window.win.hide();
-					this.hibernateSpace(window);
 				}
+				window.win?.hide();
+				this.hibernateSpace(window);
 			} else {
 				const space = this.adopt(window);
 				this.activate(space.id);
