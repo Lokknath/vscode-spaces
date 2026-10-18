@@ -31,6 +31,9 @@ export const SPACES_CATEGORY = localize2('spaces', "Spaces");
 export const SpacesEnabledContext = ContextKeyExpr.equals(`config.${SPACES_ENABLED_SETTING}`, true);
 
 export const enum SpacesCommandId {
+	AddNewSpace = 'workbench.action.spaces.addNewSpace',
+	TitleBarNewSpace = 'workbench.action.spaces.titleBarNewSpace',
+	RemoveSpace = 'workbench.action.spaces.removeSpace',
 	NewEmptySpace = 'workbench.action.spaces.newEmptySpace',
 	OpenFolderAsNewSpace = 'workbench.action.spaces.openFolderAsNewSpace',
 	OpenWorkspaceAsNewSpace = 'workbench.action.spaces.openWorkspaceAsNewSpace',
@@ -242,6 +245,132 @@ export class TitleBarSpacesPickerAction extends Action2 {
 
 	async run(accessor: ServicesAccessor): Promise<void> {
 		return showSpacesPicker(accessor, 'switch');
+	}
+}
+
+export class TitleBarNewSpaceAction extends Action2 {
+	constructor() {
+		super({
+			id: SpacesCommandId.TitleBarNewSpace,
+			title: localize2('spaces.titleBarNewSpace', "New Empty Space"),
+			icon: Codicon.plus,
+			f1: false,
+			precondition: SpacesEnabledContext,
+			menu: {
+				id: MenuId.TitleBarAdjacentCenter,
+				order: -1999,
+				when: SpacesEnabledContext
+			}
+		});
+	}
+
+	async run(accessor: ServicesAccessor): Promise<void> {
+		const spacesService = accessor.get(ISpacesService);
+		const notificationService = accessor.get(INotificationService);
+		reportResult(notificationService, await spacesService.createEmptySpace());
+	}
+}
+
+export class AddNewSpaceAction extends Action2 {
+	constructor() {
+		super({
+			id: SpacesCommandId.AddNewSpace,
+			title: localize2('spaces.addNewSpace', "Add New Space..."),
+			category: SPACES_CATEGORY,
+			f1: true,
+			precondition: SpacesEnabledContext
+		});
+	}
+
+	async run(accessor: ServicesAccessor): Promise<void> {
+		const quickInputService = accessor.get(IQuickInputService);
+		const commandService = accessor.get(ICommandService);
+
+		interface IAddSpaceItem extends IQuickPickItem {
+			readonly commandId: SpacesCommandId;
+		}
+
+		const items: IAddSpaceItem[] = [
+			{
+				commandId: SpacesCommandId.NewEmptySpace,
+				label: `$(${Codicon.add.id}) ${localize('spaces.pick.new', "New Empty Space")}`,
+				description: localize('spaces.pick.newDesc', "Create a clean, empty workspace window as a new Space")
+			},
+			{
+				commandId: SpacesCommandId.OpenFolderAsNewSpace,
+				label: `$(${Codicon.folderOpened.id}) ${localize('spaces.pick.openFolder', "Open Folder as New Space...")}`,
+				description: localize('spaces.pick.openFolderDesc', "Select and open an existing local folder in a new Space")
+			},
+			{
+				commandId: SpacesCommandId.OpenRemoteSSHSpace,
+				label: `$(${Codicon.remote.id}) ${localize('spaces.pick.openRemoteSSH', "Open Remote / SSH as New Space...")}`,
+				description: localize('spaces.pick.openRemoteSSHDesc', "Connect to an SSH server or remote folder as a new Space")
+			},
+			{
+				commandId: SpacesCommandId.CreateWorktreeSpace,
+				label: `$(${Codicon.gitFork.id}) ${localize('spaces.pick.createWorktree', "Create Space from Git Worktree...")}`,
+				description: localize('spaces.pick.createWorktreeDesc', "Branch or isolate your git repository in a linked worktree Space")
+			},
+			{
+				commandId: SpacesCommandId.OpenWorkspaceAsNewSpace,
+				label: `$(${Codicon.fileCode.id}) ${localize('spaces.pick.openWorkspace', "Open Workspace as New Space...")}`,
+				description: localize('spaces.pick.openWorkspaceDesc', "Open a multi-root .code-workspace file as a new Space")
+			}
+		];
+
+		const pick = await quickInputService.pick(items, {
+			title: localize('spaces.addNewSpaceTitle', "Add New Space"),
+			placeholder: localize('spaces.addNewSpacePlaceholder', "Select how you would like to create a new Space")
+		});
+
+		if (pick) {
+			await commandService.executeCommand(pick.commandId);
+		}
+	}
+}
+
+export class RemoveSpaceAction extends Action2 {
+	constructor() {
+		super({
+			id: SpacesCommandId.RemoveSpace,
+			title: localize2('spaces.removeSpace', "Remove Space..."),
+			category: SPACES_CATEGORY,
+			f1: true,
+			precondition: SpacesEnabledContext
+		});
+	}
+
+	async run(accessor: ServicesAccessor): Promise<void> {
+		const spacesService = accessor.get(ISpacesService);
+		const quickInputService = accessor.get(IQuickInputService);
+		const notificationService = accessor.get(INotificationService);
+		const labelService = accessor.get(ILabelService);
+
+		const { spaces } = await spacesService.getSpaces();
+		if (spaces.length === 0) {
+			notificationService.info(localize('spaces.noSpacesToRemove', "No Spaces found to remove."));
+			return;
+		}
+
+		interface IRemoveSpaceItem extends IQuickPickItem {
+			readonly spaceId: string;
+		}
+
+		const items: IRemoveSpaceItem[] = spaces.map(s => ({
+			spaceId: s.id,
+			label: `$(${Codicon.trash.id}) ${s.name}`,
+			description: s.workspace ? labelService.getUriLabel(s.workspace.uri) : localize('spaces.empty', "No folder"),
+			detail: localize('spaces.removeDetail', "Click to close and remove this Space")
+		}));
+
+		const pick = await quickInputService.pick(items, {
+			title: localize('spaces.removeSpaceTitle', "Remove Space"),
+			placeholder: localize('spaces.removeSpacePlaceholder', "Select a Space to close and remove...")
+		});
+
+		if (pick) {
+			reportResult(notificationService, await spacesService.closeSpace(pick.spaceId));
+		}
 	}
 }
 
@@ -615,12 +744,20 @@ async function showSpacesPicker(accessor: ServicesAccessor, mode: 'switch' | 'ma
 	activeSpacesPickerDisposables = disposables;
 
 	const renameButton: IQuickInputButton = { iconClass: ThemeIcon.asClassName(Codicon.edit), tooltip: localize('spaces.renameButton', "Rename Space") };
-	const closeButton: IQuickInputButton = { iconClass: ThemeIcon.asClassName(Codicon.close), tooltip: localize('spaces.closeButton', "Close Space") };
+	const removeButton: IQuickInputButton = { iconClass: ThemeIcon.asClassName(Codicon.close), tooltip: localize('spaces.removeButton', "Remove Space (Close)") };
 	const githubButton: IQuickInputButton = { iconClass: ThemeIcon.asClassName(Codicon.github), tooltip: localize('spaces.githubButton', "Open on GitHub") };
 
 	const toItems = (spaces: readonly ISpace[], gitHubUrls: Map<string, string>): Array<ISpacePickItem | IQuickPickSeparator> => {
 		const current = getCurrentSpace(spaces, nativeHostService.windowId);
 		const items: Array<ISpacePickItem | IQuickPickSeparator> = [];
+
+		// 1. Prominent "Add New Space" section at the very top of dropdown
+		items.push({ type: 'separator', label: localize('spaces.addNewCategory', "Add New Space") });
+		items.push({ commandId: SpacesCommandId.NewEmptySpace, label: `$(${Codicon.add.id}) ${localize('spaces.pick.new', "New Empty Space")}` });
+		items.push({ commandId: SpacesCommandId.OpenFolderAsNewSpace, label: `$(${Codicon.folderOpened.id}) ${localize('spaces.pick.openFolder', "Open Folder as New Space...")}` });
+		items.push({ commandId: SpacesCommandId.OpenRemoteSSHSpace, label: `$(${Codicon.remote.id}) ${localize('spaces.pick.openRemoteSSH', "Open Remote / SSH as New Space...")}` });
+		items.push({ commandId: SpacesCommandId.CreateWorktreeSpace, label: `$(${Codicon.gitFork.id}) ${localize('spaces.pick.createWorktree', "Create Space from Git Worktree...")}` });
+		items.push({ commandId: SpacesCommandId.OpenWorkspaceAsNewSpace, label: `$(${Codicon.fileCode.id}) ${localize('spaces.pick.openWorkspace', "Open Workspace as New Space...")}` });
 
 		const createSpaceItem = (space: ISpace, isCurrent: boolean): ISpacePickItem => {
 			const ghUrl = gitHubUrls.get(space.id);
@@ -629,9 +766,9 @@ async function showSpacesPicker(accessor: ServicesAccessor, mode: 'switch' | 'ma
 				buttons.push(githubButton);
 			}
 			if (mode === 'manage') {
-				buttons.push(renameButton, closeButton);
+				buttons.push(renameButton, removeButton);
 			} else {
-				buttons.push(closeButton);
+				buttons.push(removeButton);
 			}
 
 			return {
@@ -648,7 +785,7 @@ async function showSpacesPicker(accessor: ServicesAccessor, mode: 'switch' | 'ma
 			};
 		};
 
-		// Categorized sections: Active, Local, Remote SSH, Worktrees
+		// 2. Categorized sections: Active, Local, Remote SSH, Worktrees
 		if (current) {
 			items.push({ type: 'separator', label: localize('spaces.activeCategory', "Active Space") });
 			items.push(createSpaceItem(current, true));
@@ -690,17 +827,16 @@ async function showSpacesPicker(accessor: ServicesAccessor, mode: 'switch' | 'ma
 			}
 		}
 
-		items.push({ type: 'separator', label: localize('spaces.actionsCategory', "Space Actions") });
-		items.push({ commandId: SpacesCommandId.NewEmptySpace, label: `$(${Codicon.add.id}) ${localize('spaces.pick.new', "New Empty Space")}` });
-		items.push({ commandId: SpacesCommandId.OpenFolderAsNewSpace, label: `$(${Codicon.folderOpened.id}) ${localize('spaces.pick.openFolder', "Open Folder as New Space...")}` });
-		items.push({ commandId: SpacesCommandId.OpenWorkspaceAsNewSpace, label: `$(${Codicon.fileCode.id}) ${localize('spaces.pick.openWorkspace', "Open Workspace as New Space...")}` });
-		items.push({ commandId: SpacesCommandId.OpenRemoteSSHSpace, label: `$(${Codicon.remote.id}) ${localize('spaces.pick.openRemoteSSH', "Open Remote / SSH as New Space...")}` });
-		items.push({ commandId: SpacesCommandId.CreateWorktreeSpace, label: `$(${Codicon.gitFork.id}) ${localize('spaces.pick.createWorktree', "Create Space from Git Worktree...")}` });
+		// 3. Space Management actions
+		items.push({ type: 'separator', label: localize('spaces.actionsCategory', "Space Management") });
 		if (current) {
+			items.push({ commandId: SpacesCommandId.CloseCurrentSpace, label: `$(${Codicon.close.id}) ${localize('spaces.pick.removeCurrent', "Remove Current Space")}` });
+		}
+		items.push({ commandId: SpacesCommandId.RemoveSpace, label: `$(${Codicon.trash.id}) ${localize('spaces.pick.removeSpace', "Remove Space...")}` });
+		if (current) {
+			items.push({ commandId: SpacesCommandId.RenameCurrentSpace, label: `$(${Codicon.edit.id}) ${localize('spaces.pick.rename', "Rename Current Space...")}` });
 			items.push({ commandId: SpacesCommandId.OpenOnGitHub, label: `$(${Codicon.github.id}) ${localize('spaces.pick.openOnGitHub', "Open Active Space on GitHub")}` });
 			items.push({ commandId: SpacesCommandId.CreatePullRequest, label: `$(${Codicon.gitPullRequest.id}) ${localize('spaces.pick.createPR', "Create GitHub Pull Request...")}` });
-			items.push({ commandId: SpacesCommandId.RenameCurrentSpace, label: `$(${Codicon.edit.id}) ${localize('spaces.pick.rename', "Rename Current Space...")}` });
-			items.push({ commandId: SpacesCommandId.CloseCurrentSpace, label: `$(${Codicon.close.id}) ${localize('spaces.pick.close', "Close Current Space")}` });
 		} else {
 			items.push({ commandId: SpacesCommandId.AddCurrentWindowAsSpace, label: `$(${Codicon.window.id}) ${localize('spaces.pick.addCurrent', "Add Current Window as Space")}` });
 		}
@@ -720,7 +856,7 @@ async function showSpacesPicker(accessor: ServicesAccessor, mode: 'switch' | 'ma
 	}));
 
 	picker.title = mode === 'manage' ? localize('spaces.manageTitle', "Manage Spaces") : localize('spaces.switchTitle', "Switch Space");
-	picker.placeholder = localize('spaces.placeholder', "Select a Space to switch to");
+	picker.placeholder = localize('spaces.placeholder', "Select a Space to switch to, create a new Space, or remove a Space...");
 	picker.matchOnDescription = true;
 	picker.busy = true;
 	picker.show();
@@ -774,7 +910,7 @@ async function showSpacesPicker(accessor: ServicesAccessor, mode: 'switch' | 'ma
 			return;
 		}
 
-		if (button === closeButton) {
+		if (button === removeButton) {
 			reportResult(notificationService, await spacesService.closeSpace(item.space.id));
 		} else if (button === renameButton) {
 			picker.hide();

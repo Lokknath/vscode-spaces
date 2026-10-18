@@ -32,14 +32,14 @@ import { ILifecycleService } from '../../../services/lifecycle/common/lifecycle.
 import { IStatusbarEntryAccessor, IStatusbarService, StatusbarAlignment } from '../../../services/statusbar/browser/statusbar.js';
 import '../../../services/spaces/electron-browser/spacesService.js';
 import {
-	AddCurrentWindowAsSpaceAction, CloseCurrentSpaceAction, CreatePullRequestAction,
+	AddCurrentWindowAsSpaceAction, AddNewSpaceAction, CloseCurrentSpaceAction, CreatePullRequestAction,
 	CreateWorktreeSpaceAction, ListSpacesAction, NewEmptySpaceAction,
 	OpenFolderAsNewSpaceAction, OpenOnGitHubAction, OpenRemoteSSHSpaceAction,
-	OpenWorkspaceAsNewSpaceAction, RenameCurrentSpaceAction, SpacesCommandId,
+	OpenWorkspaceAsNewSpaceAction, RemoveSpaceAction, RenameCurrentSpaceAction, SpacesCommandId,
 	SwitchSpaceAction, SwitchToSpace1Action, SwitchToSpace2Action,
 	SwitchToSpace3Action, SwitchToSpace4Action, SwitchToSpace5Action,
 	SwitchToSpace6Action, SwitchToSpace7Action, SwitchToSpace8Action,
-	SwitchToSpace9Action, TitleBarSpacesPickerAction
+	SwitchToSpace9Action, TitleBarNewSpaceAction, TitleBarSpacesPickerAction
 } from './spacesActions.js';
 
 //#region Configuration
@@ -91,14 +91,17 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).regis
 //#region Actions
 
 registerAction2(NewEmptySpaceAction);
+registerAction2(AddNewSpaceAction);
 registerAction2(OpenFolderAsNewSpaceAction);
 registerAction2(OpenWorkspaceAsNewSpaceAction);
 registerAction2(AddCurrentWindowAsSpaceAction);
 registerAction2(SwitchSpaceAction);
 registerAction2(CloseCurrentSpaceAction);
+registerAction2(RemoveSpaceAction);
 registerAction2(RenameCurrentSpaceAction);
 registerAction2(ListSpacesAction);
 registerAction2(TitleBarSpacesPickerAction);
+registerAction2(TitleBarNewSpaceAction);
 registerAction2(OpenRemoteSSHSpaceAction);
 registerAction2(OpenOnGitHubAction);
 registerAction2(CreatePullRequestAction);
