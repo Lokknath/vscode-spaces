@@ -58,7 +58,8 @@ export const enum SpacesCommandId {
 	SwitchToSpace6 = 'workbench.action.spaces.switchToSpace6',
 	SwitchToSpace7 = 'workbench.action.spaces.switchToSpace7',
 	SwitchToSpace8 = 'workbench.action.spaces.switchToSpace8',
-	SwitchToSpace9 = 'workbench.action.spaces.switchToSpace9'
+	SwitchToSpace9 = 'workbench.action.spaces.switchToSpace9',
+	ShowSpacesShortcuts = 'workbench.action.spaces.showShortcuts'
 }
 
 function reportResult(notificationService: INotificationService, operation: ISpaceOperationResult): boolean {
@@ -90,7 +91,11 @@ export class NewEmptySpaceAction extends Action2 {
 			title: localize2('spaces.newEmptySpace', "New Empty Space"),
 			category: SPACES_CATEGORY,
 			precondition: SpacesEnabledContext,
-			f1: true
+			f1: true,
+			keybinding: {
+				weight: KeybindingWeight.WorkbenchContrib,
+				primary: KeyMod.CtrlCmd | KeyMod.Alt | KeyCode.KeyN
+			}
 		});
 	}
 
@@ -524,15 +529,128 @@ export class ListSpacesAction extends Action2 {
 	constructor() {
 		super({
 			id: SpacesCommandId.ListSpaces,
-			title: localize2('spaces.listSpaces', "List Spaces"),
+			title: localize2('spaces.listSpaces', "Manage Spaces..."),
 			category: SPACES_CATEGORY,
 			precondition: SpacesEnabledContext,
-			f1: true
+			f1: true,
+			keybinding: {
+				weight: KeybindingWeight.WorkbenchContrib,
+				primary: KeyMod.CtrlCmd | KeyMod.Alt | KeyCode.KeyM
+			}
 		});
 	}
 
 	async run(accessor: ServicesAccessor): Promise<void> {
 		return showSpacesPicker(accessor, 'manage');
+	}
+}
+
+export class ShowSpacesShortcutsAction extends Action2 {
+	constructor() {
+		super({
+			id: SpacesCommandId.ShowSpacesShortcuts,
+			title: localize2('spaces.showShortcuts', "Show Spaces Shortcuts Cheatsheet"),
+			category: SPACES_CATEGORY,
+			precondition: SpacesEnabledContext,
+			f1: true,
+			keybinding: {
+				weight: KeybindingWeight.WorkbenchContrib,
+				primary: KeyMod.CtrlCmd | KeyMod.Alt | KeyCode.Slash
+			}
+		});
+	}
+
+	async run(accessor: ServicesAccessor): Promise<void> {
+		const quickInputService = accessor.get(IQuickInputService);
+		const commandService = accessor.get(ICommandService);
+
+		interface IShortcutPickItem extends IQuickPickItem {
+			readonly commandId?: SpacesCommandId | string;
+		}
+
+		const items: IShortcutPickItem[] = [
+			{ type: 'separator', label: localize('spaces.shortcuts.navCategory', "Navigation & Switching") },
+			{
+				label: `$(${Codicon.arrowSwap.id}) Switch Space...`,
+				description: 'Cmd+Alt+S',
+				detail: localize('spaces.shortcuts.switchDesc', "Open interactive Spaces picker to jump between workspaces"),
+				commandId: SpacesCommandId.SwitchSpace
+			},
+			{
+				label: `$(${Codicon.history.id}) Toggle Previous Space`,
+				description: 'Cmd+Alt+Tab',
+				detail: localize('spaces.shortcuts.prevDesc', "Instantly flip back and forth between your two most recent Spaces"),
+				commandId: SpacesCommandId.TogglePreviousSpace
+			},
+			{
+				label: `$(${Codicon.listFlat.id}) Switch to Space #1 - #9`,
+				description: 'Cmd+Alt+1 .. Cmd+Alt+9',
+				detail: localize('spaces.shortcuts.digitsDesc', "Directly switch to a specific Space by its position index")
+			},
+			{ type: 'separator', label: localize('spaces.shortcuts.creationCategory', "Creation & Workspaces") },
+			{
+				label: `$(${Codicon.add.id}) New Empty Space`,
+				description: 'Cmd+Alt+N',
+				detail: localize('spaces.shortcuts.newDesc', "Create a clean, isolated workspace window as a new Space (or click '+' in title bar)"),
+				commandId: SpacesCommandId.NewEmptySpace
+			},
+			{
+				label: `$(${Codicon.folderOpened.id}) Open Folder as New Space...`,
+				description: 'Spaces Menu',
+				detail: localize('spaces.shortcuts.openFolderDesc', "Open a repository or project folder inside a dedicated Space"),
+				commandId: SpacesCommandId.OpenFolderAsNewSpace
+			},
+			{
+				label: `$(${Codicon.remote.id}) Open Remote / SSH as New Space...`,
+				description: 'Spaces Menu',
+				detail: localize('spaces.shortcuts.sshDesc', "Connect to a remote SSH machine or container in a dedicated Space"),
+				commandId: SpacesCommandId.OpenRemoteSSHSpace
+			},
+			{
+				label: `$(${Codicon.repoForked.id}) Create Space from Git Worktree...`,
+				description: 'Spaces Menu',
+				detail: localize('spaces.shortcuts.worktreeDesc', "Branch or isolate your git repository in a linked worktree Space"),
+				commandId: SpacesCommandId.CreateWorktreeSpace
+			},
+			{ type: 'separator', label: localize('spaces.shortcuts.managementCategory', "Management & Performance") },
+			{
+				label: `$(${Codicon.listUnordered.id}) Manage Spaces...`,
+				description: 'Cmd+Alt+M',
+				detail: localize('spaces.shortcuts.manageDesc', "Manage active spaces, inline rename, close, or remove spaces"),
+				commandId: SpacesCommandId.ListSpaces
+			},
+			{
+				label: `$(${Codicon.clearAll.id}) Close Inactive Spaces`,
+				description: 'Spaces Menu',
+				detail: localize('spaces.shortcuts.closeInactiveDesc', "Reclaim memory and system resources by closing all background Spaces"),
+				commandId: SpacesCommandId.CloseInactiveSpaces
+			},
+			{
+				label: `$(${Codicon.refresh.id}) Reload Current Space`,
+				description: 'Spaces Menu',
+				detail: localize('spaces.shortcuts.reloadDesc', "Reload the current Space window without touching other background Spaces"),
+				commandId: SpacesCommandId.ReloadCurrentSpace
+			},
+			{
+				label: `$(${Codicon.screenFull.id}) Toggle Full Screen`,
+				description: 'Ctrl+Cmd+F',
+				detail: localize('spaces.shortcuts.fullScreenDesc', "Enter or exit native macOS Mission Control full screen")
+			}
+		];
+
+		const picker = quickInputService.createQuickPick<IShortcutPickItem>({ useSeparators: true });
+		picker.title = localize('spaces.cheatsheetTitle', "Spaces Shortcuts & Quick Reference");
+		picker.placeholder = localize('spaces.cheatsheetPlaceholder', "Select an action to execute or press Esc to dismiss");
+		picker.items = items;
+		picker.onDidAccept(async () => {
+			const selected = picker.selectedItems[0];
+			picker.hide();
+			picker.dispose();
+			if (selected?.commandId) {
+				await commandService.executeCommand(selected.commandId);
+			}
+		});
+		picker.show();
 	}
 }
 
@@ -937,8 +1055,9 @@ async function showSpacesPicker(accessor: ServicesAccessor, mode: 'switch' | 'ma
 			items.push({ commandId: SpacesCommandId.AddCurrentWindowAsSpace, label: `$(${Codicon.window.id}) ${localize('spaces.pick.addCurrent', "Add Current Window as Space")}` });
 		}
 		if (mode === 'switch') {
-			items.push({ commandId: SpacesCommandId.ListSpaces, label: `$(${Codicon.listUnordered.id}) ${localize('spaces.pick.manage', "Manage Spaces...")}` });
+			items.push({ commandId: SpacesCommandId.ListSpaces, label: `$(${Codicon.listUnordered.id}) ${localize('spaces.pick.manage', "Manage Spaces...")}`, description: 'Cmd+Alt+M' });
 		}
+		items.push({ commandId: SpacesCommandId.ShowSpacesShortcuts, label: `$(${Codicon.keyboard.id}) ${localize('spaces.pick.shortcuts', "Spaces Shortcuts & Cheatsheet...")}`, description: 'Cmd+Alt+/' });
 
 		return items;
 	};
@@ -951,8 +1070,10 @@ async function showSpacesPicker(accessor: ServicesAccessor, mode: 'switch' | 'ma
 		disposables.dispose();
 	}));
 
-	picker.title = mode === 'manage' ? localize('spaces.manageTitle', "Manage Spaces") : localize('spaces.switchTitle', "Switch Space");
-	picker.placeholder = localize('spaces.placeholder', "Select a Space to switch to, create a new Space, or remove a Space...");
+	picker.title = mode === 'manage'
+		? localize('spaces.manageTitle', "Manage Spaces (Cmd+Alt+M)")
+		: localize('spaces.switchTitleWithShortcuts', "Switch Space (Cmd+Alt+Tab: Toggle Previous | Cmd+Alt+N: New | Cmd+Alt+/: Shortcuts)");
+	picker.placeholder = localize('spaces.placeholder', "Select a Space to switch to, or choose an action...");
 	picker.matchOnDescription = true;
 	picker.busy = true;
 	picker.show();

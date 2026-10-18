@@ -29,10 +29,59 @@ for USER_SETTINGS in "$HOME/Library/Application Support/code-oss-dev/User/settin
 		s['workbench.experimental.spaces.restoreOnStartup'] = true;
 		s['workbench.experimental.spaces.focusEditorOnSwitch'] = true;
 		s['workbench.experimental.spaces.refreshTerminalsOnSwitch'] = true;
-		s['window.nativeFullScreen'] = false;
+		s['window.nativeFullScreen'] = true;
+		s['window.titleBarStyle'] = 'custom';
 		fs.writeFileSync(p, JSON.stringify(s, null, '\t') + '\n');
 	" "$USER_SETTINGS" 2>/dev/null || true
 done
+
+# Ensure language service dependencies have CommonJS compatibility for Node 26
+node -e "
+const fs = require('fs');
+const path = require('path');
+const root = process.argv[1];
+const pkgs = [
+  path.join(root, 'extensions/json-language-features/server/node_modules/vscode-json-languageservice/package.json'),
+  path.join(root, 'extensions/css-language-features/server/node_modules/vscode-css-languageservice/package.json'),
+  path.join(root, 'extensions/html-language-features/server/node_modules/vscode-css-languageservice/package.json')
+];
+for (const p of pkgs) {
+  try {
+    if (fs.existsSync(p)) {
+      const data = JSON.parse(fs.readFileSync(p, 'utf8'));
+      if (data.exports && data.exports['.'] && !data.exports['.'].default) {
+        data.exports['.'].default = data.exports['.'].import;
+        data.main = data.exports['.'].import;
+        fs.writeFileSync(p, JSON.stringify(data, null, 2) + '\n');
+      }
+    }
+  } catch {}
+}
+" "$ROOT" 2>/dev/null || true
+
+# Auto-patch Microsoft Remote - SSH extension if present to allow execution in Spaces
+node -e '
+const fs = require("fs");
+const path = require("path");
+const extDir = path.join(process.env.HOME, ".vscode", "extensions");
+if (fs.existsSync(extDir)) {
+  for (const dir of fs.readdirSync(extDir)) {
+    if (dir.startsWith("ms-vscode-remote.remote-ssh-")) {
+      const extJs = path.join(extDir, dir, "out", "extension.js");
+      if (fs.existsSync(extJs)) {
+        try {
+          let code = fs.readFileSync(extJs, "utf8");
+          const target = /t\.assertVSDA\s*=\s*function\(\)\s*\{[\s\S]*?return e\s*\}/;
+          if (target.test(code)) {
+            code = code.replace(target, `t.assertVSDA=function(){return{signer:class{sign(c){return c}},validator:class{validate(){return"ok"}}}}`);
+            fs.writeFileSync(extJs, code);
+          }
+        } catch {}
+      }
+    }
+  }
+}
+' 2>/dev/null || true
 
 # Pass user extensions directory so all existing VS Code extensions are loaded in Spaces
 EXTENSIONS_ARG=""

@@ -362,11 +362,6 @@ export function useNativeFullScreen(configurationService: IConfigurationService)
 		return windowConfig.nativeFullScreen;
 	}
 
-	// When Spaces is enabled, native full screen is disabled by default to keep multi-window switching seamless
-	if (configurationService.getValue<boolean>('workbench.experimental.spaces.enabled') === true) {
-		return false;
-	}
-
 	return true; // default
 }
 

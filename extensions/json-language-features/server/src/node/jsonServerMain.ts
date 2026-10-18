@@ -7,11 +7,13 @@ import { createConnection, Connection, Disposable } from 'vscode-languageserver/
 import { formatError } from '../utils/runner.js';
 import { RequestService, RuntimeEnvironment, startServer } from '../jsonServer.js';
 
-import requestLight, { XHRResponse } from 'request-light';
+import * as requestLightModule from 'request-light';
+import { XHRResponse } from 'request-light';
 import { URI as Uri } from 'vscode-uri';
 import { promises as fs } from 'fs';
 import * as l10n from '@vscode/l10n';
 
+const requestLight = (requestLightModule as any).default || requestLightModule;
 const { xhr, configure: configureHttpRequests, getErrorStatusDescription } = requestLight;
 
 // Create a connection for the server.

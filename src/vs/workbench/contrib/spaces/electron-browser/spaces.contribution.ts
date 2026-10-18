@@ -39,7 +39,8 @@ import {
 	SwitchSpaceAction, SwitchToSpace1Action, SwitchToSpace2Action,
 	SwitchToSpace3Action, SwitchToSpace4Action, SwitchToSpace5Action,
 	SwitchToSpace6Action, SwitchToSpace7Action, SwitchToSpace8Action,
-	SwitchToSpace9Action, TitleBarNewSpaceAction, TitleBarSpacesPickerAction, TogglePreviousSpaceAction
+	SwitchToSpace9Action, TitleBarNewSpaceAction, TitleBarSpacesPickerAction, TogglePreviousSpaceAction,
+	ShowSpacesShortcutsAction
 } from './spacesActions.js';
 
 //#region Configuration
@@ -118,6 +119,7 @@ registerAction2(SwitchToSpace6Action);
 registerAction2(SwitchToSpace7Action);
 registerAction2(SwitchToSpace8Action);
 registerAction2(SwitchToSpace9Action);
+registerAction2(ShowSpacesShortcutsAction);
 
 //#endregion
 
@@ -164,7 +166,7 @@ class SpacesTitleBarWidget extends BaseActionViewItem {
 		container.classList.add('spaces-titlebar-widget');
 		container.setAttribute('role', 'button');
 		container.setAttribute('aria-haspopup', 'listbox');
-		this._register(this.hoverService.setupManagedHover(getDefaultHoverDelegate('element'), container, localize('spaces.titleBarHover', "Switch Space")));
+		this._register(this.hoverService.setupManagedHover(getDefaultHoverDelegate('element'), container, localize('spaces.titleBarHover', "Spaces (Cmd+Alt+S) • Previous: Cmd+Alt+Tab • New: Cmd+Alt+N • Cheatsheet: Cmd+Alt+/")));
 
 		append(container, $(`span.spaces-titlebar-widget-icon${ThemeIcon.asCSSSelector(Codicon.window)}`));
 		this.labelElement = append(container, $('span.spaces-titlebar-widget-label'));
@@ -172,10 +174,10 @@ class SpacesTitleBarWidget extends BaseActionViewItem {
 		append(container, $(`span.spaces-titlebar-widget-chevron${ThemeIcon.asCSSSelector(Codicon.chevronDown)}`));
 
 		const plusElement = append(container, $(`span.spaces-titlebar-widget-plus${ThemeIcon.asCSSSelector(Codicon.plus)}`));
-		plusElement.title = localize('spaces.newSpaceTooltip', "New Empty Space");
+		plusElement.title = localize('spaces.newSpaceTooltip', "New Empty Space (Cmd+Alt+N)");
 		plusElement.setAttribute('role', 'button');
 		plusElement.setAttribute('tabindex', '0');
-		plusElement.setAttribute('aria-label', localize('spaces.newSpaceTooltip', "New Empty Space"));
+		plusElement.setAttribute('aria-label', localize('spaces.newSpaceTooltip', "New Empty Space (Cmd+Alt+N)"));
 		this._register(addDisposableListener(plusElement, EventType.CLICK, (e: MouseEvent) => {
 			e.stopPropagation();
 			e.preventDefault();

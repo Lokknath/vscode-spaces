@@ -5,7 +5,7 @@
 
 import electron from 'electron';
 import { Emitter, Event } from '../../../base/common/event.js';
-import { Disposable, DisposableMap, DisposableStore } from '../../../base/common/lifecycle.js';
+import { Disposable, DisposableMap, DisposableStore, toDisposable } from '../../../base/common/lifecycle.js';
 import { isMacintosh } from '../../../base/common/platform.js';
 import { AddFirstParameterToFunctions } from '../../../base/common/types.js';
 import { URI, UriComponents } from '../../../base/common/uri.js';
@@ -95,8 +95,16 @@ export class SpacesMainService extends Disposable implements ISpacesMainService 
 			this.persistSpacesState();
 		}));
 		this._register(this.windowsMainService.onDidOpenWindow(window => this.onDidOpenWindow(window)));
-		this._register(this.lifecycleMainService.onWillShutdown(() => this.persistSpacesState()));
-		electron.app.on('before-quit', () => this.persistSpacesState());
+		if (this.lifecycleMainService?.onWillShutdown) {
+			this._register(this.lifecycleMainService.onWillShutdown(() => this.persistSpacesState()));
+		}
+		if (electron.app?.on) {
+			const beforeQuitHandler = () => this.persistSpacesState();
+			electron.app.on('before-quit', beforeQuitHandler);
+			this._register(toDisposable(() => {
+				electron.app.removeListener('before-quit', beforeQuitHandler);
+			}));
+		}
 	}
 
 	async getSpaces(windowId: number | undefined): Promise<ISpacesSnapshot> {
