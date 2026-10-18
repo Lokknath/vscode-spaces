@@ -95,6 +95,8 @@ export class SpacesMainService extends Disposable implements ISpacesMainService 
 			this.persistSpacesState();
 		}));
 		this._register(this.windowsMainService.onDidOpenWindow(window => this.onDidOpenWindow(window)));
+		this._register(this.lifecycleMainService.onWillShutdown(() => this.persistSpacesState()));
+		electron.app.on('before-quit', () => this.persistSpacesState());
 	}
 
 	async getSpaces(windowId: number | undefined): Promise<ISpacesSnapshot> {
@@ -545,6 +547,12 @@ export class SpacesMainService extends Disposable implements ISpacesMainService 
 
 		const space = this.model.getSpaceByWindowId(windowId);
 		if (!space) {
+			return;
+		}
+
+		// When the entire app is quitting, do NOT remove spaces from the model or state,
+		// so that when the app restarts, all spaces are cleanly restored!
+		if (this.lifecycleMainService.quitRequested) {
 			return;
 		}
 

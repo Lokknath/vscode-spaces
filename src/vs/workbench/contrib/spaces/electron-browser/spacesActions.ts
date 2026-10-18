@@ -34,6 +34,9 @@ export const enum SpacesCommandId {
 	AddNewSpace = 'workbench.action.spaces.addNewSpace',
 	TitleBarNewSpace = 'workbench.action.spaces.titleBarNewSpace',
 	RemoveSpace = 'workbench.action.spaces.removeSpace',
+	TogglePreviousSpace = 'workbench.action.spaces.togglePreviousSpace',
+	CloseInactiveSpaces = 'workbench.action.spaces.closeInactiveSpaces',
+	ReloadCurrentSpace = 'workbench.action.spaces.reloadCurrentSpace',
 	NewEmptySpace = 'workbench.action.spaces.newEmptySpace',
 	OpenFolderAsNewSpace = 'workbench.action.spaces.openFolderAsNewSpace',
 	OpenWorkspaceAsNewSpace = 'workbench.action.spaces.openWorkspaceAsNewSpace',
@@ -371,6 +374,91 @@ export class RemoveSpaceAction extends Action2 {
 		if (pick) {
 			reportResult(notificationService, await spacesService.closeSpace(pick.spaceId));
 		}
+	}
+}
+
+export class TogglePreviousSpaceAction extends Action2 {
+	constructor() {
+		super({
+			id: SpacesCommandId.TogglePreviousSpace,
+			title: localize2('spaces.togglePreviousSpace', "Switch to Previous Space"),
+			category: SPACES_CATEGORY,
+			precondition: SpacesEnabledContext,
+			f1: true,
+			keybinding: {
+				weight: KeybindingWeight.WorkbenchContrib,
+				primary: KeyMod.CtrlCmd | KeyMod.Alt | KeyCode.Tab
+			}
+		});
+	}
+
+	async run(accessor: ServicesAccessor): Promise<void> {
+		const spacesService = accessor.get(ISpacesService);
+		const nativeHostService = accessor.get(INativeHostService);
+		const notificationService = accessor.get(INotificationService);
+
+		const { spaces } = await spacesService.getSpaces();
+		const current = getCurrentSpace(spaces, nativeHostService.windowId);
+		const candidates = (spaces || [])
+			.filter(s => s && s.id !== current?.id)
+			.sort((a, b) => (b.lastActiveAt ?? 0) - (a.lastActiveAt ?? 0));
+
+		const previous = candidates[0];
+		if (!previous) {
+			notificationService.info(localize('spaces.noPreviousSpace', "No other Space to switch to."));
+			return;
+		}
+
+		reportResult(notificationService, await spacesService.switchToSpace(previous.id));
+	}
+}
+
+export class CloseInactiveSpacesAction extends Action2 {
+	constructor() {
+		super({
+			id: SpacesCommandId.CloseInactiveSpaces,
+			title: localize2('spaces.closeInactiveSpaces', "Close Inactive Spaces"),
+			category: SPACES_CATEGORY,
+			precondition: SpacesEnabledContext,
+			f1: true
+		});
+	}
+
+	async run(accessor: ServicesAccessor): Promise<void> {
+		const spacesService = accessor.get(ISpacesService);
+		const nativeHostService = accessor.get(INativeHostService);
+		const notificationService = accessor.get(INotificationService);
+
+		const { spaces } = await spacesService.getSpaces();
+		const current = getCurrentSpace(spaces, nativeHostService.windowId);
+		const inactiveSpaces = (spaces || []).filter(s => s && s.id !== current?.id);
+
+		if (inactiveSpaces.length === 0) {
+			notificationService.info(localize('spaces.noInactiveSpaces', "No inactive Spaces to close."));
+			return;
+		}
+
+		for (const space of inactiveSpaces) {
+			await spacesService.closeSpace(space.id);
+		}
+		notificationService.info(localize('spaces.closedInactive', "Closed {0} inactive Spaces.", inactiveSpaces.length));
+	}
+}
+
+export class ReloadCurrentSpaceAction extends Action2 {
+	constructor() {
+		super({
+			id: SpacesCommandId.ReloadCurrentSpace,
+			title: localize2('spaces.reloadCurrentSpace', "Reload Current Space"),
+			category: SPACES_CATEGORY,
+			precondition: SpacesEnabledContext,
+			f1: true
+		});
+	}
+
+	async run(accessor: ServicesAccessor): Promise<void> {
+		const nativeHostService = accessor.get(INativeHostService);
+		await nativeHostService.reload();
 	}
 }
 
@@ -747,8 +835,9 @@ async function showSpacesPicker(accessor: ServicesAccessor, mode: 'switch' | 'ma
 	const removeButton: IQuickInputButton = { iconClass: ThemeIcon.asClassName(Codicon.close), tooltip: localize('spaces.removeButton', "Remove Space (Close)") };
 	const githubButton: IQuickInputButton = { iconClass: ThemeIcon.asClassName(Codicon.github), tooltip: localize('spaces.githubButton', "Open on GitHub") };
 
-	const toItems = (spaces: readonly ISpace[], gitHubUrls: Map<string, string>): Array<ISpacePickItem | IQuickPickSeparator> => {
-		const current = getCurrentSpace(spaces, nativeHostService.windowId);
+	const toItems = (spaces: readonly ISpace[], gitInfo: { urls: Map<string, string>; branches: Map<string, string> }): Array<ISpacePickItem | IQuickPickSeparator> => {
+		const validSpaces = (spaces || []).filter((s): s is ISpace => !!s && typeof s.id === 'string');
+		const current = getCurrentSpace(validSpaces, nativeHostService.windowId);
 		const items: Array<ISpacePickItem | IQuickPickSeparator> = [];
 
 		// 1. Prominent "Add New Space" section at the very top of dropdown
@@ -760,7 +849,8 @@ async function showSpacesPicker(accessor: ServicesAccessor, mode: 'switch' | 'ma
 		items.push({ commandId: SpacesCommandId.OpenWorkspaceAsNewSpace, label: `$(${Codicon.fileCode.id}) ${localize('spaces.pick.openWorkspace', "Open Workspace as New Space...")}` });
 
 		const createSpaceItem = (space: ISpace, isCurrent: boolean): ISpacePickItem => {
-			const ghUrl = gitHubUrls.get(space.id);
+			const ghUrl = gitInfo.urls.get(space.id);
+			const branch = gitInfo.branches.get(space.id);
 			const buttons: IQuickInputButton[] = [];
 			if (ghUrl) {
 				buttons.push(githubButton);
@@ -771,13 +861,16 @@ async function showSpacesPicker(accessor: ServicesAccessor, mode: 'switch' | 'ma
 				buttons.push(removeButton);
 			}
 
+			const branchBadge = branch ? `  ⎇ ${branch}` : '';
+			const workspaceLabel = space.workspace ? labelService.getUriLabel(space.workspace.uri) : localize('spaces.empty', "No folder");
+
 			return {
 				space,
 				githubUrl: ghUrl,
 				label: space.needsAttention
 					? `$(${Codicon.bellDot.id}) ${localize('spaces.needsAttention', "{0} — needs attention", space.name)}`
 					: `$(${isCurrent ? Codicon.check.id : Codicon.blank.id}) ${space.name}`,
-				description: space.workspace ? labelService.getUriLabel(space.workspace.uri) : localize('spaces.empty', "No folder"),
+				description: `${workspaceLabel}${branchBadge}`,
 				detail: mode === 'manage'
 					? localize('spaces.detailState', "{0} · last active {1}", space.state === 'active' ? localize('spaces.stateActive', "Active") : localize('spaces.stateInactive', "Running in background"), space.lastActiveAt ? new Date(space.lastActiveAt).toLocaleTimeString() : localize('spaces.never', "never"))
 					: undefined,
@@ -791,15 +884,15 @@ async function showSpacesPicker(accessor: ServicesAccessor, mode: 'switch' | 'ma
 			items.push(createSpaceItem(current, true));
 		}
 
-		const otherSpaces = spaces.filter(s => s.id !== current?.id);
+		const otherSpaces = validSpaces.filter(s => s.id !== current?.id);
 		const localSpaces: ISpace[] = [];
 		const remoteSpaces: ISpace[] = [];
 		const worktreeSpaces: ISpace[] = [];
 
 		for (const space of otherSpaces) {
-			if (space.workspace?.uri.scheme === 'vscode-remote') {
+			if (space.workspace?.uri?.scheme === 'vscode-remote') {
 				remoteSpaces.push(space);
-			} else if (space.workspace && (space.name.includes('[worktree') || space.workspace.uri.fsPath.includes('-worktree-') || space.workspace.uri.fsPath.includes('.worktrees'))) {
+			} else if (space.workspace && (space.name.includes('[worktree') || space.workspace.uri?.fsPath?.includes('-worktree-') || space.workspace.uri?.fsPath?.includes('.worktrees'))) {
 				worktreeSpaces.push(space);
 			} else {
 				localSpaces.push(space);
@@ -829,11 +922,14 @@ async function showSpacesPicker(accessor: ServicesAccessor, mode: 'switch' | 'ma
 
 		// 3. Space Management actions
 		items.push({ type: 'separator', label: localize('spaces.actionsCategory', "Space Management") });
+		items.push({ commandId: SpacesCommandId.TogglePreviousSpace, label: `$(${Codicon.arrowSwap.id}) ${localize('spaces.pick.togglePrev', "Switch to Previous Space")}` });
 		if (current) {
 			items.push({ commandId: SpacesCommandId.CloseCurrentSpace, label: `$(${Codicon.close.id}) ${localize('spaces.pick.removeCurrent', "Remove Current Space")}` });
 		}
+		items.push({ commandId: SpacesCommandId.CloseInactiveSpaces, label: `$(${Codicon.clearAll.id}) ${localize('spaces.pick.closeInactive', "Close Inactive Spaces")}` });
 		items.push({ commandId: SpacesCommandId.RemoveSpace, label: `$(${Codicon.trash.id}) ${localize('spaces.pick.removeSpace', "Remove Space...")}` });
 		if (current) {
+			items.push({ commandId: SpacesCommandId.ReloadCurrentSpace, label: `$(${Codicon.refresh.id}) ${localize('spaces.pick.reload', "Reload Current Space")}` });
 			items.push({ commandId: SpacesCommandId.RenameCurrentSpace, label: `$(${Codicon.edit.id}) ${localize('spaces.pick.rename', "Rename Current Space...")}` });
 			items.push({ commandId: SpacesCommandId.OpenOnGitHub, label: `$(${Codicon.github.id}) ${localize('spaces.pick.openOnGitHub', "Open Active Space on GitHub")}` });
 			items.push({ commandId: SpacesCommandId.CreatePullRequest, label: `$(${Codicon.gitPullRequest.id}) ${localize('spaces.pick.createPR', "Create GitHub Pull Request...")}` });
@@ -861,34 +957,47 @@ async function showSpacesPicker(accessor: ServicesAccessor, mode: 'switch' | 'ma
 	picker.busy = true;
 	picker.show();
 
-	const resolveGitHubUrls = async (spaces: readonly ISpace[]): Promise<Map<string, string>> => {
-		const map = new Map<string, string>();
+	const resolveGitInfo = async (spaces: readonly ISpace[]): Promise<{ urls: Map<string, string>; branches: Map<string, string> }> => {
+		const urls = new Map<string, string>();
+		const branches = new Map<string, string>();
+		if (!Array.isArray(spaces)) {
+			return { urls, branches };
+		}
 		await Promise.all(spaces.map(async space => {
-			if (space.workspace?.uri) {
+			if (space?.id && space?.workspace?.uri) {
 				try {
 					const url = await getGitHubUrlForUri(fileService, space.workspace.uri);
 					if (url) {
-						map.set(space.id, url);
+						urls.set(space.id, url);
 					}
 				} catch {
 					// Ignore URL error
 				}
+				try {
+					const branch = await getGitBranchForUri(fileService, space.workspace.uri);
+					if (branch) {
+						branches.set(space.id, branch);
+					}
+				} catch {
+					// Ignore branch error
+				}
 			}
 		}));
-		return map;
+		return { urls, branches };
 	};
 
 	spacesService.getSpaces().then(async snapshot => {
-		let gitHubUrls = new Map<string, string>();
-		picker.items = toItems(snapshot.spaces, gitHubUrls);
-		picker.activeItems = picker.items.filter((item): item is ISpacePickItem => item.type !== 'separator' && item.space?.windowId === nativeHostService.windowId);
+		let gitInfo = { urls: new Map<string, string>(), branches: new Map<string, string>() };
+		const spacesList = snapshot?.spaces || [];
+		picker.items = toItems(spacesList, gitInfo);
+		picker.activeItems = picker.items.filter((item): item is ISpacePickItem => item.type !== 'separator' && !!item.space && item.space.windowId === nativeHostService.windowId);
 		picker.busy = false;
 
 		try {
-			gitHubUrls = await resolveGitHubUrls(snapshot.spaces);
-			picker.items = toItems(snapshot.spaces, gitHubUrls);
+			gitInfo = await resolveGitInfo(spacesList);
+			picker.items = toItems(spacesList, gitInfo);
 		} catch {
-			// Ignore GitHub URL resolution error
+			// Ignore Git info resolution error
 		}
 	}).catch(err => {
 		picker.busy = false;
@@ -897,16 +1006,17 @@ async function showSpacesPicker(accessor: ServicesAccessor, mode: 'switch' | 'ma
 
 	disposables.add(spacesService.onDidChangeSpaces(async newSnapshot => {
 		picker.keepScrollPosition = true;
+		const spacesList = newSnapshot?.spaces || [];
 		try {
-			const urls = await resolveGitHubUrls(newSnapshot.spaces);
-			picker.items = toItems(newSnapshot.spaces, urls);
+			const info = await resolveGitInfo(spacesList);
+			picker.items = toItems(spacesList, info);
 		} catch {
-			picker.items = toItems(newSnapshot.spaces, new Map());
+			picker.items = toItems(spacesList, { urls: new Map(), branches: new Map() });
 		}
 	}));
 
 	disposables.add(picker.onDidTriggerItemButton(async ({ item, button }) => {
-		if (!item.space) {
+		if (!item?.space?.id) {
 			return;
 		}
 
@@ -924,7 +1034,7 @@ async function showSpacesPicker(accessor: ServicesAccessor, mode: 'switch' | 'ma
 		const [item] = picker.selectedItems;
 		picker.hide();
 
-		if (item?.space) {
+		if (item?.space?.id) {
 			reportResult(notificationService, await spacesService.switchToSpace(item.space.id));
 		} else if (item?.commandId) {
 			await commandService.executeCommand(item.commandId);
