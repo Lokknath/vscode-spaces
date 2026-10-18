@@ -308,7 +308,7 @@ export class AddNewSpaceAction extends Action2 {
 			},
 			{
 				commandId: SpacesCommandId.CreateWorktreeSpace,
-				label: `$(${Codicon.gitFork.id}) ${localize('spaces.pick.createWorktree', "Create Space from Git Worktree...")}`,
+				label: `$(${Codicon.repoForked.id}) ${localize('spaces.pick.createWorktree', "Create Space from Git Worktree...")}`,
 				description: localize('spaces.pick.createWorktreeDesc', "Branch or isolate your git repository in a linked worktree Space")
 			},
 			{
@@ -756,7 +756,7 @@ async function showSpacesPicker(accessor: ServicesAccessor, mode: 'switch' | 'ma
 		items.push({ commandId: SpacesCommandId.NewEmptySpace, label: `$(${Codicon.add.id}) ${localize('spaces.pick.new', "New Empty Space")}` });
 		items.push({ commandId: SpacesCommandId.OpenFolderAsNewSpace, label: `$(${Codicon.folderOpened.id}) ${localize('spaces.pick.openFolder', "Open Folder as New Space...")}` });
 		items.push({ commandId: SpacesCommandId.OpenRemoteSSHSpace, label: `$(${Codicon.remote.id}) ${localize('spaces.pick.openRemoteSSH', "Open Remote / SSH as New Space...")}` });
-		items.push({ commandId: SpacesCommandId.CreateWorktreeSpace, label: `$(${Codicon.gitFork.id}) ${localize('spaces.pick.createWorktree', "Create Space from Git Worktree...")}` });
+		items.push({ commandId: SpacesCommandId.CreateWorktreeSpace, label: `$(${Codicon.repoForked.id}) ${localize('spaces.pick.createWorktree', "Create Space from Git Worktree...")}` });
 		items.push({ commandId: SpacesCommandId.OpenWorkspaceAsNewSpace, label: `$(${Codicon.fileCode.id}) ${localize('spaces.pick.openWorkspace', "Open Workspace as New Space...")}` });
 
 		const createSpaceItem = (space: ISpace, isCurrent: boolean): ISpacePickItem => {

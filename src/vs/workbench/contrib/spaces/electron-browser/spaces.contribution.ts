@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import './media/spaces.css';
-import { $, append } from '../../../../base/browser/dom.js';
+import { $, addDisposableListener, append, EventType } from '../../../../base/browser/dom.js';
 import { BaseActionViewItem, IBaseActionViewItemOptions } from '../../../../base/browser/ui/actionbar/actionViewItems.js';
 import { getDefaultHoverDelegate } from '../../../../base/browser/ui/hover/hoverDelegateFactory.js';
 import { IAction } from '../../../../base/common/actions.js';
@@ -167,6 +167,17 @@ class SpacesTitleBarWidget extends BaseActionViewItem {
 		this.labelElement = append(container, $('span.spaces-titlebar-widget-label'));
 		this.attentionElement = append(container, $(`span.spaces-titlebar-widget-attention${ThemeIcon.asCSSSelector(Codicon.bellDot)}`));
 		append(container, $(`span.spaces-titlebar-widget-chevron${ThemeIcon.asCSSSelector(Codicon.chevronDown)}`));
+
+		const plusElement = append(container, $(`span.spaces-titlebar-widget-plus${ThemeIcon.asCSSSelector(Codicon.plus)}`));
+		plusElement.title = localize('spaces.newSpaceTooltip', "New Empty Space");
+		plusElement.setAttribute('role', 'button');
+		plusElement.setAttribute('tabindex', '0');
+		plusElement.setAttribute('aria-label', localize('spaces.newSpaceTooltip', "New Empty Space"));
+		this._register(addDisposableListener(plusElement, EventType.CLICK, (e: MouseEvent) => {
+			e.stopPropagation();
+			e.preventDefault();
+			this.spacesService.createEmptySpace();
+		}));
 
 		this.update(undefined);
 		this._register(this.spacesService.onDidChangeSpaces(snapshot => this.update(snapshot)));

@@ -354,15 +354,20 @@ export function useWindowControlsOverlay(configurationService: IConfigurationSer
 
 export function useNativeFullScreen(configurationService: IConfigurationService): boolean {
 	const windowConfig = configurationService.getValue<IWindowSettings | undefined>('window');
-	if (!windowConfig || typeof windowConfig.nativeFullScreen !== 'boolean') {
-		return true; // default
-	}
-
-	if (windowConfig.nativeTabs) {
+	if (windowConfig?.nativeTabs) {
 		return true; // https://github.com/electron/electron/issues/16142
 	}
 
-	return windowConfig.nativeFullScreen !== false;
+	if (windowConfig && typeof windowConfig.nativeFullScreen === 'boolean') {
+		return windowConfig.nativeFullScreen;
+	}
+
+	// When Spaces is enabled, native full screen is disabled by default to keep multi-window switching seamless
+	if (configurationService.getValue<boolean>('workbench.experimental.spaces.enabled') === true) {
+		return false;
+	}
+
+	return true; // default
 }
 
 

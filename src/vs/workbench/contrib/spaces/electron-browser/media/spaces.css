@@ -36,6 +36,19 @@
 	font-size: 14px;
 }
 
+.monaco-workbench .spaces-titlebar-widget > .spaces-titlebar-widget-plus {
+	margin-left: 4px;
+	padding: 2px 4px;
+	border-radius: 4px;
+	font-size: 13px;
+	opacity: 0.8;
+}
+
+.monaco-workbench .spaces-titlebar-widget > .spaces-titlebar-widget-plus:hover {
+	opacity: 1;
+	background-color: var(--vscode-toolbar-hoverBackground, rgba(255, 255, 255, 0.1));
+}
+
 .monaco-workbench .spaces-titlebar-widget > .spaces-titlebar-widget-attention {
 	color: var(--vscode-activityBarBadge-background);
 	animation: spaces-attention-pulse 1.5s infinite ease-in-out;

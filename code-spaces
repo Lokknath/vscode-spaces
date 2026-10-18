@@ -18,19 +18,20 @@ ROOT="$( cd -P "$( dirname "$SOURCE" )" >/dev/null 2>&1 && pwd )"
 # Ensure user settings have Spaces settings enabled in both dev paths
 for USER_SETTINGS in "$HOME/Library/Application Support/code-oss-dev/User/settings.json" "$HOME/.vscode-oss-dev/data/User/settings.json"; do
 	mkdir -p "$(dirname "$USER_SETTINGS")"
-	if [ ! -f "$USER_SETTINGS" ] || [ "$(cat "$USER_SETTINGS" 2>/dev/null)" = "{}" ] || [ ! -s "$USER_SETTINGS" ]; then
-		cat << 'EOF' > "$USER_SETTINGS"
-{
-	"workbench.experimental.spaces.enabled": true,
-	"workbench.experimental.spaces.resourceOptimization": true,
-	"workbench.experimental.spaces.autoAdoptWindows": true,
-	"workbench.experimental.spaces.restoreOnStartup": true,
-	"workbench.experimental.spaces.focusEditorOnSwitch": true,
-	"workbench.experimental.spaces.refreshTerminalsOnSwitch": true,
-	"window.nativeFullScreen": false
-}
-EOF
-	fi
+	node -e "
+		const fs = require('fs');
+		const p = process.argv[1];
+		let s = {};
+		try { if (fs.existsSync(p)) s = JSON.parse(fs.readFileSync(p, 'utf8') || '{}'); } catch {}
+		s['workbench.experimental.spaces.enabled'] = true;
+		s['workbench.experimental.spaces.resourceOptimization'] = true;
+		s['workbench.experimental.spaces.autoAdoptWindows'] = true;
+		s['workbench.experimental.spaces.restoreOnStartup'] = true;
+		s['workbench.experimental.spaces.focusEditorOnSwitch'] = true;
+		s['workbench.experimental.spaces.refreshTerminalsOnSwitch'] = true;
+		s['window.nativeFullScreen'] = false;
+		fs.writeFileSync(p, JSON.stringify(s, null, '\t') + '\n');
+	" "$USER_SETTINGS" 2>/dev/null || true
 done
 
 # Pass user extensions directory so all existing VS Code extensions are loaded in Spaces
