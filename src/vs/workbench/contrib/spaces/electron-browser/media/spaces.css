@@ -66,13 +66,6 @@
 }
 
 /* Inactive Space Resource Suspension */
-body.spaces-inactive *,
-body.spaces-inactive *::before,
-body.spaces-inactive *::after {
-	animation-play-state: paused !important;
-	transition: none !important;
-}
-
 body.spaces-inactive .monaco-editor .cursors-layer .cursor {
 	visibility: hidden !important;
 }

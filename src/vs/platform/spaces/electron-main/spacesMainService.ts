@@ -332,15 +332,13 @@ export class SpacesMainService extends Disposable implements ISpacesMainService 
 			targetWin.show();
 		}
 		this.showAuxiliaryWindows(targetWindow.id);
-		targetWindow.focus();
 
 		if (previousWindow && previousWin?.isVisible()) {
 			this.lastFrame = captureFrame(previousWin);
 			this.hideAuxiliaryWindows(previousWindow.id);
-			if (previousWin.isFullScreen()) {
+			if (previousWin.isFullScreen() && !targetWin.isFullScreen()) {
 				try {
 					targetWin.setFullScreen(true);
-					previousWin.setFullScreen(false);
 				} catch {
 					// Ignore fullscreen toggle errors
 				}
@@ -349,6 +347,8 @@ export class SpacesMainService extends Disposable implements ISpacesMainService 
 			// Hibernate inactive Space to free GPU/CPU and trim memory
 			this.hibernateSpace(previousWindow);
 		}
+
+		targetWindow.focus();
 
 		return { result: SpaceOperationResult.Ok, space: this.model.getSpace(target.id) };
 	}
@@ -478,8 +478,19 @@ export class SpacesMainService extends Disposable implements ISpacesMainService 
 		const savedState = restoreOnStartup ? this.stateService?.getItem<IPersistedSpacesState>(SPACES_STATE_KEY) : undefined;
 		const windowWorkspace = toSpaceWorkspace(window.openedWorkspace);
 
+		// Guard: If this is an initial startup, and an empty space already exists, and this window is a duplicate empty window with no unsaved files,
+		// close it to avoid spawning duplicate empty windows and wasting ~500MB RAM.
+		if (!windowWorkspace && currentSnapshot.spaces.some(s => !s.workspace) && window.config?.initialStartup && !window.backupPath) {
+			this.logService.info(`[spaces] closing duplicate empty window ${window.id} on startup`);
+			window.win?.destroy();
+			return;
+		}
+
 		if (savedState && savedState.spaces.length > 0) {
 			const savedEntry = savedState.spaces.find(entry => {
+				if (!entry.workspace && !windowWorkspace) {
+					return true; // Match empty spaces!
+				}
 				if (!entry.workspace || !windowWorkspace) {
 					return false;
 				}
@@ -508,8 +519,18 @@ export class SpacesMainService extends Disposable implements ISpacesMainService 
 		}
 
 		if (autoAdopt) {
+			const isInitialStartup = window.config?.initialStartup;
 			if (currentSnapshot.spaces.length === 0) {
 				this.adoptAsActiveSpace(window);
+			} else if (isInitialStartup) {
+				// Secondary window during startup: adopt into the background without stealing focus or flipping windows
+				this.adopt(window);
+				const activeWin = this.getActiveSpaceWindow()?.win;
+				if (activeWin && !activeWin.isDestroyed() && window.win && !window.win.isDestroyed()) {
+					applyFrame(window.win, captureFrame(activeWin));
+					window.win.hide();
+					this.hibernateSpace(window);
+				}
 			} else {
 				const space = this.adopt(window);
 				this.activate(space.id);
@@ -614,8 +635,20 @@ function captureFrame(win: electron.BrowserWindow): ISpaceFrame {
 }
 
 function applyFrame(win: electron.BrowserWindow, frame: ISpaceFrame): void {
+	const curBounds = win.getNormalBounds();
+	const curMaximized = win.isMaximized();
+
+	if (curMaximized === frame.maximized &&
+		curBounds.x === frame.bounds.x && curBounds.y === frame.bounds.y &&
+		curBounds.width === frame.bounds.width && curBounds.height === frame.bounds.height) {
+		return;
+	}
+
 	if (frame.maximized) {
-		win.setBounds(frame.bounds);
+		if (curBounds.x !== frame.bounds.x || curBounds.y !== frame.bounds.y ||
+			curBounds.width !== frame.bounds.width || curBounds.height !== frame.bounds.height) {
+			win.setBounds(frame.bounds);
+		}
 		if (!win.isMaximized()) {
 			win.maximize();
 		}
@@ -623,6 +656,9 @@ function applyFrame(win: electron.BrowserWindow, frame: ISpaceFrame): void {
 		if (win.isMaximized()) {
 			win.unmaximize();
 		}
-		win.setBounds(frame.bounds);
+		if (curBounds.x !== frame.bounds.x || curBounds.y !== frame.bounds.y ||
+			curBounds.width !== frame.bounds.width || curBounds.height !== frame.bounds.height) {
+			win.setBounds(frame.bounds);
+		}
 	}
 }

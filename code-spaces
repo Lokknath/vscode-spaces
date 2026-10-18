@@ -31,6 +31,7 @@ for USER_SETTINGS in "$HOME/Library/Application Support/code-oss-dev/User/settin
 		s['workbench.experimental.spaces.refreshTerminalsOnSwitch'] = true;
 		s['window.nativeFullScreen'] = true;
 		s['window.titleBarStyle'] = 'custom';
+		if (!s['window.restoreWindows']) s['window.restoreWindows'] = 'preserve';
 		fs.writeFileSync(p, JSON.stringify(s, null, '\t') + '\n');
 	" "$USER_SETTINGS" 2>/dev/null || true
 done
