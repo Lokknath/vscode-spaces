@@ -7,7 +7,6 @@
   "engines": {
     "node": "*"
   },
-  "type": "module",
   "main": "./out/node/cssServerMain",
   "browser": "./dist/browser/cssServerMain",
   "dependencies": {
