@@ -99,7 +99,7 @@ import { ElectronURLListener } from '../../platform/url/electron-main/electronUr
 import { IWebviewManagerService } from '../../platform/webview/common/webviewManagerService.js';
 import { WebviewMainService } from '../../platform/webview/electron-main/webviewMainService.js';
 import { AgentsWindowOpenSource, isFolderToOpen, isWorkspaceToOpen, IWindowOpenable } from '../../platform/window/common/window.js';
-import { getAllWindowsExcludingOffscreen, IWindowsMainService, OpenContext } from '../../platform/windows/electron-main/windows.js';
+import { IWindowsMainService, OpenContext } from '../../platform/windows/electron-main/windows.js';
 import { ICodeWindow } from '../../platform/window/electron-main/window.js';
 import { WindowsMainService } from '../../platform/windows/electron-main/windowsMainService.js';
 import { ActiveWindowManager } from '../../platform/windows/node/windowTracker.js';
@@ -379,21 +379,19 @@ export class CodeApplication extends Disposable {
 			return details.resourceType === 'xhr' || isSafeFrame(details.frame);
 		};
 
-		const isAllowedVsCodeFileRequest = (details: Electron.OnBeforeRequestListenerDetails) => {
-			const frame = details.frame;
-			if (!frame || frame.isDestroyed() || !this.windowsMainService) {
-				return false;
-			}
-
-			// Check to see if the request comes from one of the main windows (or shared process) and not from embedded content
-			const windows = getAllWindowsExcludingOffscreen();
-			for (const window of windows) {
-				if (frame.processId === window.webContents.mainFrame.processId) {
-					return true;
+		const isAllowedVsCodeFileRequest = (details: Electron.OnBeforeRequestListenerDetails): boolean => {
+			// Embedded webviews (running inside vscode-webview://) are isolated
+			// and not permitted to directly request raw vscode-file:// resources.
+			// All other contexts (main windows, background spaces, Web Workers,
+			// utility processes, and extension hosts) are legitimate VS Code contexts.
+			let frame: WebFrameMain | null | undefined = details.frame;
+			for (; frame; frame = frame.parent) {
+				if (frame.isDestroyed() || frame.url.startsWith(`${Schemas.vscodeWebview}://`)) {
+					return false;
 				}
 			}
 
-			return false;
+			return true;
 		};
 
 		const isAllowedWebviewRequest = (uri: URI, details: Electron.OnBeforeRequestListenerDetails): boolean => {
