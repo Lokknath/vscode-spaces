@@ -510,10 +510,18 @@ export class SpacesMainService extends Disposable implements ISpacesMainService 
 			return;
 		}
 
-		// When spaces already exist in this session, immediately hide newly opened secondary windows
+		// During initial startup restoration, immediately hide newly opened secondary windows
 		// so they do not flash on screen or steal focus while waiting for workspace and configuration to load.
+		// For runtime windows, synchronize their frame immediately so they open seamlessly in place.
 		if (this.model.size > 0 && window.win && !window.win.isDestroyed() && !window.config?.isSessionsWindow) {
-			window.win.hide();
+			if (window.config?.isInitialStartup) {
+				window.win.hide();
+			} else {
+				const activeWin = this.getActiveSpaceWindow()?.win;
+				if (activeWin && !activeWin.isDestroyed()) {
+					applyFrame(window.win, captureFrame(activeWin));
+				}
+			}
 		}
 
 		const handle = () => {

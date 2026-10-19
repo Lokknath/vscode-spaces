@@ -1304,8 +1304,8 @@ export class CodeWindow extends BaseWindow implements ICodeWindow {
 		this.wasLoaded = true;
 
 		// Make window visible if it did not open in N seconds because this indicates an error
-		// Only do this when running out of sources and not when running tests
-		if (!this.environmentMainService.isBuilt && !this.environmentMainService.extensionTestsLocationURI) {
+		// Only do this when explicitly requested via --open-devtools, running out of sources and not when running tests
+		if (Boolean(this.environmentMainService.args['open-devtools']) && !this.environmentMainService.isBuilt && !this.environmentMainService.extensionTestsLocationURI) {
 			this._register(new RunOnceScheduler(() => {
 				// A window that signaled ready but is not visible was hidden on purpose (e.g. an inactive Space)
 				if (this._win && !this._win.isVisible() && !this._win.isMinimized() && !this.isReady) {

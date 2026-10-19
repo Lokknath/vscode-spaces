@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { VSBuffer } from '../../../base/common/buffer.js';
+import { isCancellationError } from '../../../base/common/errors.js';
 import { Disposable } from '../../../base/common/lifecycle.js';
 import { MarshalledId } from '../../../base/common/marshallingIds.js';
 import { joinPath } from '../../../base/common/resources.js';
@@ -124,6 +125,9 @@ export class AhpJsonlLogger extends Disposable {
 		}
 		this._drainScheduled = true;
 		this._queue = this._queue.then(() => this._drainPending()).catch(error => {
+			if (isCancellationError(error) || String(error).includes('Canceled')) {
+				return;
+			}
 			this._logService.error('[AHPLog] Failed to write transport log', error);
 		});
 	}

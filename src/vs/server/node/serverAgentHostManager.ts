@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { raceTimeout } from '../../base/common/async.js';
+import { isCancellationError } from '../../base/common/errors.js';
 import { Event } from '../../base/common/event.js';
 import { Disposable, DisposableStore, MutableDisposable } from '../../base/common/lifecycle.js';
 import { ProxyChannel } from '../../base/parts/ipc/common/ipc.js';
@@ -220,7 +221,11 @@ export class ServerAgentHostManager extends Disposable implements IServerAgentHo
 				this._logService.warn(`ServerAgentHostManager: agent host did not shut down within ${Constants.ShutdownTimeoutMs}ms; terminating it`);
 			});
 		} catch (error) {
-			this._logService.error('ServerAgentHostManager: failed to shut down agent host gracefully', error);
+			if (isCancellationError(error) || String(error).includes('Canceled')) {
+				this._logService.trace('ServerAgentHostManager: shutdown canceled', error);
+			} else {
+				this._logService.error('ServerAgentHostManager: failed to shut down agent host gracefully', error);
+			}
 		} finally {
 			const connection = this._connection;
 			this._startPromise = undefined;

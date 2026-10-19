@@ -587,7 +587,7 @@ export class PromptsService extends Disposable implements IPromptsService {
 				const userInvocable = parsedPromptFile?.header?.userInvocable;
 				return { status: 'loaded', promptPath: this.withPromptPathMetadata(promptPath, name, description), argumentHint, userInvocable } satisfies ISlashCommandDiscoveryResult;
 			} catch (e) {
-				if (!isCancellationError(e)) {
+				if (!isCancellationError(e) && !token.isCancellationRequested && !String(e).includes('Canceled')) {
 					this.logger.error(`[computeSlashCommandDiscoveryInfo] Failed to parse prompt file for slash command: ${promptPath.uri}`, e instanceof Error ? e.message : String(e));
 				}
 				return { status: 'skipped', skipReason: 'parse-error', errorMessage: e instanceof Error ? e.message : String(e), promptPath } satisfies ISlashCommandDiscoveryResult;
@@ -797,7 +797,7 @@ export class PromptsService extends Disposable implements IPromptsService {
 				const skipReason = isEnabled ? undefined : 'disabled';
 				return { status, skipReason, promptPath: this.withPromptPathMetadata(promptPath, agent.name, agent.description), agent };
 			} catch (e) {
-				if (isCancellationError(e)) {
+				if (token.isCancellationRequested || isCancellationError(e) || String(e).includes('Canceled')) {
 					throw e;
 				}
 				const error = e instanceof Error ? e : new Error(String(e));
@@ -969,7 +969,7 @@ export class PromptsService extends Disposable implements IPromptsService {
 					contents.push(content);
 				}
 			} catch (error) {
-				if (token.isCancellationRequested || isCancellationError(error)) {
+				if (token.isCancellationRequested || isCancellationError(error) || String(error).includes('Canceled')) {
 					return undefined;
 				}
 				if (!(error instanceof FileOperationError && error.fileOperationResult === FileOperationResult.FILE_NOT_FOUND)) {

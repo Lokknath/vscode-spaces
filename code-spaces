@@ -78,6 +78,10 @@ if (fs.existsSync(extDir)) {
               code = code.replaceAll(target, "return{signer:class{sign(c){return c}},validator:class{validate(){return\"ok\"}}}");
               fs.writeFileSync(filePath, code);
             }
+            if (code.includes("t.minimatch.Minimatch=") && !code.includes("t.Minimatch=t.minimatch.Minimatch=")) {
+              code = code.replaceAll("t.minimatch.Minimatch=", "t.Minimatch=t.minimatch.Minimatch=");
+              fs.writeFileSync(filePath, code);
+            }
           } catch {}
         }
       }

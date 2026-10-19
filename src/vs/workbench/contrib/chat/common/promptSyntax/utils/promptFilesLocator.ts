@@ -691,7 +691,9 @@ export class PromptFilesLocator {
 				return result;
 			}
 		} catch (e) {
-			if (e instanceof FileOperationError && e.fileOperationResult === FileOperationResult.FILE_NOT_FOUND) {
+			if (token.isCancellationRequested || isCancellationError(e) || String(e).includes('Canceled')) {
+				// ignore cancellation during window close/reload
+			} else if (e instanceof FileOperationError && e.fileOperationResult === FileOperationResult.FILE_NOT_FOUND) {
 				// ignore
 			} else {
 				this.logService.error(`Failed to resolve files at location: ${location.toString()}`, e);

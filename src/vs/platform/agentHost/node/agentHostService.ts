@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { raceTimeout } from '../../../base/common/async.js';
+import { isCancellationError } from '../../../base/common/errors.js';
 import { Disposable, DisposableStore, MutableDisposable } from '../../../base/common/lifecycle.js';
 import { ILogService, ILoggerService } from '../../log/common/log.js';
 import { RemoteLoggerChannelClient } from '../../log/common/logIpc.js';
@@ -118,7 +119,11 @@ export class AgentHostProcessManager extends Disposable {
 						this._logService.warn(`AgentHostProcessManager: agent host did not shut down before restart within ${Constants.ShutdownTimeoutMs}ms; terminating it`);
 					});
 				} catch (error) {
-					this._logService.error('AgentHostProcessManager: failed to shut down agent host gracefully before restart', error);
+					if (isCancellationError(error) || String(error).includes('Canceled')) {
+						this._logService.trace('AgentHostProcessManager: shutdown canceled before restart', error);
+					} else {
+						this._logService.error('AgentHostProcessManager: failed to shut down agent host gracefully before restart', error);
+					}
 				} finally {
 					this._clearConnection(connection);
 				}
@@ -246,7 +251,11 @@ export class AgentHostProcessManager extends Disposable {
 				this._logService.warn(`AgentHostProcessManager: agent host did not shut down within ${Constants.ShutdownTimeoutMs}ms; terminating it`);
 			});
 		} catch (error) {
-			this._logService.error('AgentHostProcessManager: failed to shut down agent host gracefully', error);
+			if (isCancellationError(error) || String(error).includes('Canceled')) {
+				this._logService.trace('AgentHostProcessManager: shutdown canceled', error);
+			} else {
+				this._logService.error('AgentHostProcessManager: failed to shut down agent host gracefully', error);
+			}
 		} finally {
 			this._clearConnection(this._connection);
 		}
