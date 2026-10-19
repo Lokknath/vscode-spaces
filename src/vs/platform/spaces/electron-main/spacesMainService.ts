@@ -20,6 +20,7 @@ import { ICodeWindow } from '../../window/electron-main/window.js';
 import { IWindowsMainService, OpenContext } from '../../windows/electron-main/windows.js';
 import { IStateService } from '../../state/node/state.js';
 import { ISingleFolderWorkspaceIdentifier, IWorkspaceIdentifier, isSingleFolderWorkspaceIdentifier, isWorkspaceIdentifier } from '../../workspace/common/workspace.js';
+import { IBackupMainService } from '../../backup/electron-main/backup.js';
 import { ICommonSpacesService, ISpaceOperationResult, ISpacesSnapshot, ISpaceWorkspace, SPACES_AUTO_ADOPT_SETTING, SPACES_RESTORE_ON_STARTUP_SETTING, SpaceOperationResult } from '../common/spaces.js';
 import { SpacesModel } from '../common/spacesModel.js';
 
@@ -87,7 +88,8 @@ export class SpacesMainService extends Disposable implements ISpacesMainService 
 		@ILifecycleMainService private readonly lifecycleMainService: ILifecycleMainService,
 		@IConfigurationService private readonly configurationService: IConfigurationService,
 		@ILogService private readonly logService: ILogService,
-		@IStateService private readonly stateService?: IStateService
+		@IStateService private readonly stateService?: IStateService,
+		@IBackupMainService private readonly backupMainService?: IBackupMainService
 	) {
 		super();
 
@@ -341,9 +343,11 @@ export class SpacesMainService extends Disposable implements ISpacesMainService 
 		if (previousWindow && previousWin?.isVisible()) {
 			this.lastFrame = captureFrame(previousWin);
 			this.hideAuxiliaryWindows(previousWindow.id);
-			if (previousWin.isFullScreen() && !targetWin.isFullScreen()) {
+
+			const wasFullScreen = previousWin.isFullScreen();
+			if (wasFullScreen) {
 				try {
-					targetWin.setFullScreen(true);
+					previousWin.setFullScreen(false);
 				} catch {
 					// Ignore fullscreen toggle errors
 				}
@@ -351,6 +355,14 @@ export class SpacesMainService extends Disposable implements ISpacesMainService 
 			previousWin.hide();
 			// Hibernate inactive Space to free GPU/CPU and trim memory
 			this.hibernateSpace(previousWindow);
+
+			if (wasFullScreen && !targetWin.isFullScreen()) {
+				try {
+					targetWin.setFullScreen(true);
+				} catch {
+					// Ignore fullscreen toggle errors
+				}
+			}
 		}
 
 		targetWindow.focus();
@@ -508,9 +520,13 @@ export class SpacesMainService extends Disposable implements ISpacesMainService 
 		const isInitialStartup = !!window.config?.isInitialStartup;
 
 		// Guard: If this is an initial startup, and an empty space already exists in the current session,
-		// and this window is a duplicate empty window with no unsaved files (no backupPath),
+		// and this window is a duplicate empty window with no unsaved files,
 		// close it immediately to avoid spawning duplicate empty windows and wasting ~500MB RAM.
-		if (!windowWorkspace && isInitialStartup && !window.backupPath) {
+		const hasDirtyEmptyBackup = this.backupMainService && window.backupPath
+			? this.backupMainService.getEmptyWindowBackups().some(b => b.backupFolder === window.backupPath)
+			: false;
+
+		if (!windowWorkspace && isInitialStartup && !hasDirtyEmptyBackup) {
 			const hasEmptySpace = currentSnapshot.spaces.some(s => !s.workspace);
 			const savedEmptyIndex = savedState?.spaces.findIndex((entry, idx) => !entry.workspace && !this.claimedSavedSpaces.has(idx));
 			const savedEmptyEntry = savedEmptyIndex !== undefined && savedEmptyIndex !== -1 ? savedState?.spaces[savedEmptyIndex] : undefined;
@@ -554,6 +570,13 @@ export class SpacesMainService extends Disposable implements ISpacesMainService 
 					if (activeWin && !activeWin.isDestroyed() && window.win && !window.win.isDestroyed()) {
 						applyFrame(window.win, captureFrame(activeWin));
 					}
+					if (window.win?.isFullScreen()) {
+						try {
+							window.win.setFullScreen(false);
+						} catch {
+							// Ignore
+						}
+					}
 					window.win?.hide();
 					this.hibernateSpace(window);
 				}
@@ -570,6 +593,13 @@ export class SpacesMainService extends Disposable implements ISpacesMainService 
 				const activeWin = this.getActiveSpaceWindow()?.win;
 				if (activeWin && !activeWin.isDestroyed() && window.win && !window.win.isDestroyed()) {
 					applyFrame(window.win, captureFrame(activeWin));
+				}
+				if (window.win?.isFullScreen()) {
+					try {
+						window.win.setFullScreen(false);
+					} catch {
+						// Ignore
+					}
 				}
 				window.win?.hide();
 				this.hibernateSpace(window);
@@ -677,6 +707,10 @@ function captureFrame(win: electron.BrowserWindow): ISpaceFrame {
 }
 
 function applyFrame(win: electron.BrowserWindow, frame: ISpaceFrame): void {
+	if (win.isFullScreen()) {
+		return;
+	}
+
 	const curBounds = win.getNormalBounds();
 	const curMaximized = win.isMaximized();
 

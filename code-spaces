@@ -68,16 +68,18 @@ const extDir = path.join(process.env.HOME, ".vscode", "extensions");
 if (fs.existsSync(extDir)) {
   for (const dir of fs.readdirSync(extDir)) {
     if (dir.startsWith("ms-vscode-remote.remote-ssh-")) {
-      const extJs = path.join(extDir, dir, "out", "extension.js");
-      if (fs.existsSync(extJs)) {
-        try {
-          let code = fs.readFileSync(extJs, "utf8");
-          const target = /t\.assertVSDA\s*=\s*function\(\)\s*\{[\s\S]*?return e\s*\}/;
-          if (target.test(code)) {
-            code = code.replace(target, `t.assertVSDA=function(){return{signer:class{sign(c){return c}},validator:class{validate(){return"ok"}}}}`);
-            fs.writeFileSync(extJs, code);
-          }
-        } catch {}
+      for (const file of ["extension.js", "resolver.js"]) {
+        const filePath = path.join(extDir, dir, "out", file);
+        if (fs.existsSync(filePath)) {
+          try {
+            let code = fs.readFileSync(filePath, "utf8");
+            const target = "if(!e)throw new Error(\"Remote - SSH is only supported in Microsoft versions of VS Code\");return e";
+            if (code.includes(target)) {
+              code = code.replaceAll(target, "return{signer:class{sign(c){return c}},validator:class{validate(){return\"ok\"}}}");
+              fs.writeFileSync(filePath, code);
+            }
+          } catch {}
+        }
       }
     }
   }
