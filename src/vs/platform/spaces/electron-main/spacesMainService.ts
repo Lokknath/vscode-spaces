@@ -80,6 +80,7 @@ export class SpacesMainService extends Disposable implements ISpacesMainService 
 	 */
 	private destroyedSpace: { readonly spaceId: string; readonly windowId: number; readonly frame: ISpaceFrame | undefined } | undefined;
 	private readonly claimedSavedSpaces = new Set<number>();
+	private readonly initialSavedState: IPersistedSpacesState | undefined;
 
 	constructor(
 		@IWindowsMainService private readonly windowsMainService: IWindowsMainService,
@@ -92,6 +93,8 @@ export class SpacesMainService extends Disposable implements ISpacesMainService 
 		@IBackupMainService private readonly backupMainService?: IBackupMainService
 	) {
 		super();
+
+		this.initialSavedState = this.stateService?.getItem<IPersistedSpacesState>(SPACES_STATE_KEY);
 
 		this._register(this.model.onDidChange(() => {
 			this._onDidChangeSpaces.fire(this.model.snapshot());
@@ -201,12 +204,12 @@ export class SpacesMainService extends Disposable implements ISpacesMainService 
 			this.logService.trace(`[spaces] Space ${spaceId} needs attention`);
 
 			// Tri-factor attention notification: Trigger dock bounce or frame flash
-			if (isMacintosh && electron.app.dock) {
-				electron.app.dock.bounce('informational');
+			if (isMacintosh && electron?.app?.dock) {
+				electron.app.dock.bounce?.('informational');
 			} else {
 				const activeWin = this.getActiveSpaceWindow()?.win;
 				if (activeWin && !activeWin.isDestroyed()) {
-					activeWin.flashFrame(true);
+					activeWin.flashFrame?.(true);
 				}
 			}
 		}
@@ -344,16 +347,7 @@ export class SpacesMainService extends Disposable implements ISpacesMainService 
 			this.lastFrame = captureFrame(previousWin);
 			this.hideAuxiliaryWindows(previousWindow.id);
 
-			const wasSimpleFullScreen = previousWin.isSimpleFullScreen?.() ?? false;
 			this.safeHideWindow(previousWindow);
-
-			if (wasSimpleFullScreen && !targetWin.isSimpleFullScreen?.()) {
-				try {
-					targetWin.setSimpleFullScreen(true);
-				} catch {
-					// Ignore fullscreen toggle errors
-				}
-			}
 		}
 
 		targetWindow.focus();
@@ -367,26 +361,43 @@ export class SpacesMainService extends Disposable implements ISpacesMainService 
 			return;
 		}
 
-		if (win.isFullScreen()) {
-			// On macOS, calling hide() while transitioning out of native fullscreen causes
-			// a crash or leaves an orphaned, pitch-black Mission Control space.
-			// Wait for the exit transition to complete before hiding the window.
-			win.once('leave-full-screen', () => {
-				if (!win.isDestroyed()) {
-					win.hide();
-					this.hibernateSpace(window);
-				}
-			});
+		// 1. If in simple full-screen on macOS, exit before hiding so Cocoa resets presentation options
+		if (win.isSimpleFullScreen?.()) {
 			try {
-				win.setFullScreen(false);
+				win.setSimpleFullScreen(false);
 			} catch {
+				// Ignore
+			}
+		}
+
+		// 2. If in native macOS full-screen, exit full-screen cleanly before hiding
+		// to avoid leaving an orphaned pitch-black Mission Control space
+		if (this.isInNativeFullScreen(window)) {
+			let handled = false;
+			const doHide = () => {
+				if (handled || win.isDestroyed()) {
+					return;
+				}
+				handled = true;
 				win.hide();
 				this.hibernateSpace(window);
+			};
+
+			win.once('leave-full-screen', doHide);
+			setTimeout(doHide, 1000);
+
+			try {
+				win.setFullScreen(false);
+				return;
+			} catch {
+				doHide();
+				return;
 			}
-		} else {
-			win.hide();
-			this.hibernateSpace(window);
 		}
+
+		// 3. For normal / maximized windows, hide immediately and hibernate
+		win.hide();
+		this.hibernateSpace(window);
 	}
 
 	private hibernateSpace(window: ICodeWindow): void {
@@ -534,7 +545,7 @@ export class SpacesMainService extends Disposable implements ISpacesMainService 
 
 	private tryAdoptOrRestoreWindow(window: ICodeWindow, autoAdopt: boolean, restoreOnStartup: boolean): void {
 		const currentSnapshot = this.model.snapshot();
-		const savedState = restoreOnStartup ? this.stateService?.getItem<IPersistedSpacesState>(SPACES_STATE_KEY) : undefined;
+		const savedState = restoreOnStartup ? this.initialSavedState : undefined;
 		const windowWorkspace = toSpaceWorkspace(window.openedWorkspace);
 		const isInitialStartup = !!window.config?.isInitialStartup;
 
@@ -614,13 +625,25 @@ export class SpacesMainService extends Disposable implements ISpacesMainService 
 	}
 
 	private persistSpacesState(): void {
-		if (!this.stateService) {
+		if (!this.stateService || this.lifecycleMainService.quitRequested) {
 			return;
 		}
 
 		try {
 			const snapshot = this.model.snapshot();
-			if (snapshot.spaces.length === 0) {
+			const restoreOnStartup = this.configurationService.getValue<boolean>(SPACES_RESTORE_ON_STARTUP_SETTING) === true;
+
+			// If startup restoration is in progress, preserve any saved spaces that have not yet been claimed/restored
+			const unclaimedSpaces: IPersistedSpaceEntry[] = [];
+			if (restoreOnStartup && this.initialSavedState?.spaces) {
+				for (let i = 0; i < this.initialSavedState.spaces.length; i++) {
+					if (!this.claimedSavedSpaces.has(i)) {
+						unclaimedSpaces.push(this.initialSavedState.spaces[i]);
+					}
+				}
+			}
+
+			if (snapshot.spaces.length === 0 && unclaimedSpaces.length === 0) {
 				this.stateService.removeItem(SPACES_STATE_KEY);
 				return;
 			}
@@ -631,9 +654,11 @@ export class SpacesMainService extends Disposable implements ISpacesMainService 
 				isActive: space.id === snapshot.activeSpaceId
 			}));
 
+			spaces.push(...unclaimedSpaces);
+
 			const state: IPersistedSpacesState = {
 				spaces,
-				lastFrame: this.lastFrame
+				lastFrame: this.lastFrame ?? this.initialSavedState?.lastFrame
 			};
 
 			this.stateService.setItem(SPACES_STATE_KEY, state);
@@ -651,12 +676,6 @@ export class SpacesMainService extends Disposable implements ISpacesMainService 
 
 		const space = this.model.getSpaceByWindowId(windowId);
 		if (!space) {
-			return;
-		}
-
-		// When the entire app is quitting, do NOT remove spaces from the model or state,
-		// so that when the app restarts, all spaces are cleanly restored!
-		if (this.lifecycleMainService.quitRequested) {
 			return;
 		}
 
@@ -710,7 +729,7 @@ function captureFrame(win: electron.BrowserWindow): ISpaceFrame {
 }
 
 function applyFrame(win: electron.BrowserWindow, frame: ISpaceFrame): void {
-	if (win.isFullScreen() || win.isSimpleFullScreen?.()) {
+	if (win.isFullScreen?.() || win.isSimpleFullScreen?.()) {
 		return;
 	}
 

@@ -103,6 +103,10 @@ class FakeBrowserWindow {
 	isMinimized(): boolean { return this.minimized; }
 	isMaximized(): boolean { return this.maximized; }
 	isDestroyed(): boolean { return this.destroyed; }
+	isFullScreen(): boolean { return false; }
+	isSimpleFullScreen(): boolean { return false; }
+	setFullScreen(_val: boolean): void {}
+	setSimpleFullScreen(_val: boolean): void {}
 	show(): void { this.visible = true; }
 	showInactive(): void { this.visible = true; }
 	hide(): void { this.visible = false; }
