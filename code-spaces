@@ -86,6 +86,36 @@ if (fs.existsSync(extDir)) {
 }
 ' 2>/dev/null || true
 
+# Sanitize persisted window states on macOS to ensure no windows restore in buggy native fullscreen
+node -e '
+const fs = require("fs");
+const path = require("path");
+const dbPath = path.join(process.env.HOME, "Library/Application Support/code-oss-dev/User/globalStorage/storage.json");
+if (fs.existsSync(dbPath)) {
+  try {
+    const data = JSON.parse(fs.readFileSync(dbPath, "utf8"));
+    let modified = false;
+    if (data.windowsState) {
+      if (Array.isArray(data.windowsState.openedWindows)) {
+        for (const win of data.windowsState.openedWindows) {
+          if (win.uiState && win.uiState.mode === 3) {
+            win.uiState.mode = 1;
+            modified = true;
+          }
+        }
+      }
+      if (data.windowsState.lastActiveWindow?.uiState?.mode === 3) {
+        data.windowsState.lastActiveWindow.uiState.mode = 1;
+        modified = true;
+      }
+    }
+    if (modified) {
+      fs.writeFileSync(dbPath, JSON.stringify(data, null, 2) + "\n");
+    }
+  } catch {}
+}
+' 2>/dev/null || true
+
 # Pass user extensions directory so all existing VS Code extensions are loaded in Spaces
 EXTENSIONS_ARG=""
 if [ -d "$HOME/.vscode/extensions" ]; then

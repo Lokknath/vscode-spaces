@@ -362,7 +362,7 @@ export function useNativeFullScreen(configurationService: IConfigurationService)
 		return windowConfig.nativeFullScreen;
 	}
 
-	return true; // default
+	return false; // Default to simple full-screen in Spaces to prevent macOS creating isolated spaces and crashing on window transitions
 }
 
 

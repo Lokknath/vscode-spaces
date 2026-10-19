@@ -344,21 +344,12 @@ export class SpacesMainService extends Disposable implements ISpacesMainService 
 			this.lastFrame = captureFrame(previousWin);
 			this.hideAuxiliaryWindows(previousWindow.id);
 
-			const wasFullScreen = previousWin.isFullScreen();
-			if (wasFullScreen) {
-				try {
-					previousWin.setFullScreen(false);
-				} catch {
-					// Ignore fullscreen toggle errors
-				}
-			}
-			previousWin.hide();
-			// Hibernate inactive Space to free GPU/CPU and trim memory
-			this.hibernateSpace(previousWindow);
+			const wasSimpleFullScreen = previousWin.isSimpleFullScreen?.() ?? false;
+			this.safeHideWindow(previousWindow);
 
-			if (wasFullScreen && !targetWin.isFullScreen()) {
+			if (wasSimpleFullScreen && !targetWin.isSimpleFullScreen?.()) {
 				try {
-					targetWin.setFullScreen(true);
+					targetWin.setSimpleFullScreen(true);
 				} catch {
 					// Ignore fullscreen toggle errors
 				}
@@ -368,6 +359,34 @@ export class SpacesMainService extends Disposable implements ISpacesMainService 
 		targetWindow.focus();
 
 		return { result: SpaceOperationResult.Ok, space: this.model.getSpace(target.id) };
+	}
+
+	private safeHideWindow(window: ICodeWindow): void {
+		const win = window.win;
+		if (!win || win.isDestroyed()) {
+			return;
+		}
+
+		if (win.isFullScreen()) {
+			// On macOS, calling hide() while transitioning out of native fullscreen causes
+			// a crash or leaves an orphaned, pitch-black Mission Control space.
+			// Wait for the exit transition to complete before hiding the window.
+			win.once('leave-full-screen', () => {
+				if (!win.isDestroyed()) {
+					win.hide();
+					this.hibernateSpace(window);
+				}
+			});
+			try {
+				win.setFullScreen(false);
+			} catch {
+				win.hide();
+				this.hibernateSpace(window);
+			}
+		} else {
+			win.hide();
+			this.hibernateSpace(window);
+		}
 	}
 
 	private hibernateSpace(window: ICodeWindow): void {
@@ -570,15 +589,7 @@ export class SpacesMainService extends Disposable implements ISpacesMainService 
 					if (activeWin && !activeWin.isDestroyed() && window.win && !window.win.isDestroyed()) {
 						applyFrame(window.win, captureFrame(activeWin));
 					}
-					if (window.win?.isFullScreen()) {
-						try {
-							window.win.setFullScreen(false);
-						} catch {
-							// Ignore
-						}
-					}
-					window.win?.hide();
-					this.hibernateSpace(window);
+					this.safeHideWindow(window);
 				}
 				return;
 			}
@@ -594,15 +605,7 @@ export class SpacesMainService extends Disposable implements ISpacesMainService 
 				if (activeWin && !activeWin.isDestroyed() && window.win && !window.win.isDestroyed()) {
 					applyFrame(window.win, captureFrame(activeWin));
 				}
-				if (window.win?.isFullScreen()) {
-					try {
-						window.win.setFullScreen(false);
-					} catch {
-						// Ignore
-					}
-				}
-				window.win?.hide();
-				this.hibernateSpace(window);
+				this.safeHideWindow(window);
 			} else {
 				const space = this.adopt(window);
 				this.activate(space.id);
@@ -707,7 +710,7 @@ function captureFrame(win: electron.BrowserWindow): ISpaceFrame {
 }
 
 function applyFrame(win: electron.BrowserWindow, frame: ISpaceFrame): void {
-	if (win.isFullScreen()) {
+	if (win.isFullScreen() || win.isSimpleFullScreen?.()) {
 		return;
 	}
 
