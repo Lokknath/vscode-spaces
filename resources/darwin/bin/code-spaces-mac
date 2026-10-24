@@ -1,0 +1,175 @@
+#!/usr/bin/env bash
+#
+# VS Code Spaces Native macOS Launcher
+# Launches VS Code Spaces with Resource Optimization Engine
+#
+
+set -e
+
+# Augment PATH so Node and system tools are available when launched from Finder/LaunchServices
+export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH"
+
+export VSCODE_SKIP_NODE_VERSION_CHECK=1
+export VSCODE_SKIP_PRELAUNCH=1
+export NODE_ENV=development
+export VSCODE_DEV=1
+export VSCODE_CLI=1
+
+# Resolve App bundle Contents directory
+SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$SOURCE" ]; do
+  DIR="$( cd -P "$( dirname "$SOURCE" )" >/dev/null 2>&1 && pwd )"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+CONTENTS_DIR="$( cd -P "$( dirname "$SOURCE" )/.." >/dev/null 2>&1 && pwd )"
+
+# Resolve Repository Root
+if [ -d "$CONTENTS_DIR/Resources/app" ]; then
+  REPO_DIR="$CONTENTS_DIR/Resources/app"
+else
+  CALL_DIR="$( cd -P "$( dirname "$SOURCE" )/../../../.." >/dev/null 2>&1 && pwd )"
+  if [ -f "$CALL_DIR/product.json" ]; then
+    REPO_DIR="$CALL_DIR"
+  elif [ -d "/Users/lokkki/vscode-spaces" ]; then
+    REPO_DIR="/Users/lokkki/vscode-spaces"
+  else
+    REPO_DIR="$PWD"
+  fi
+fi
+
+# 1. Ensure user settings have Spaces & Resource Optimization enabled
+for USER_SETTINGS in "$HOME/Library/Application Support/code-oss-dev/User/settings.json" "$HOME/.vscode-oss-dev/data/User/settings.json"; do
+	mkdir -p "$(dirname "$USER_SETTINGS")"
+	node -e "
+		const fs = require('fs');
+		const p = process.argv[1];
+		let s = {};
+		try { if (fs.existsSync(p)) s = JSON.parse(fs.readFileSync(p, 'utf8') || '{}'); } catch {}
+		s['workbench.experimental.spaces.enabled'] = true;
+		s['workbench.experimental.spaces.resourceOptimization'] = true;
+		s['workbench.experimental.spaces.autoAdoptWindows'] = true;
+		s['workbench.experimental.spaces.restoreOnStartup'] = true;
+		s['workbench.experimental.spaces.focusEditorOnSwitch'] = true;
+		s['workbench.experimental.spaces.refreshTerminalsOnSwitch'] = true;
+		s['window.nativeFullScreen'] = false;
+		s['window.titleBarStyle'] = 'custom';
+		if (!s['window.restoreWindows']) s['window.restoreWindows'] = 'preserve';
+		fs.writeFileSync(p, JSON.stringify(s, null, '\t') + '\n');
+	" "$USER_SETTINGS" 2>/dev/null || true
+done
+
+# 2. Ensure language service dependencies have CommonJS compatibility for Node 26
+node -e "
+const fs = require('fs');
+const path = require('path');
+const root = process.argv[1];
+const pkgs = [
+  path.join(root, 'extensions/json-language-features/server/node_modules/vscode-json-languageservice/package.json'),
+  path.join(root, 'extensions/css-language-features/server/node_modules/vscode-css-languageservice/package.json'),
+  path.join(root, 'extensions/html-language-features/server/node_modules/vscode-css-languageservice/package.json')
+];
+for (const p of pkgs) {
+  try {
+    if (fs.existsSync(p)) {
+      const data = JSON.parse(fs.readFileSync(p, 'utf8'));
+      if (data.exports && data.exports['.'] && !data.exports['.'].default) {
+        data.exports['.'].default = data.exports['.'].import;
+        data.main = data.exports['.'].import;
+        fs.writeFileSync(p, JSON.stringify(data, null, 2) + '\n');
+      }
+    }
+  } catch {}
+}
+" "$REPO_DIR" 2>/dev/null || true
+
+# 3. Auto-patch Microsoft Remote - SSH extension if present to allow execution in Spaces
+node -e '
+const fs = require("fs");
+const path = require("path");
+const extDir = path.join(process.env.HOME, ".vscode", "extensions");
+if (fs.existsSync(extDir)) {
+  for (const dir of fs.readdirSync(extDir)) {
+    if (dir.startsWith("ms-vscode-remote.remote-ssh-")) {
+      for (const file of ["extension.js", "resolver.js"]) {
+        const filePath = path.join(extDir, dir, "out", file);
+        if (fs.existsSync(filePath)) {
+          try {
+            let code = fs.readFileSync(filePath, "utf8");
+            const target = "if(!e)throw new Error(\"Remote - SSH is only supported in Microsoft versions of VS Code\");return e";
+            if (code.includes(target)) {
+              code = code.replaceAll(target, "return{signer:class{sign(c){return c}},validator:class{validate(){return\"ok\"}}}");
+              fs.writeFileSync(filePath, code);
+            }
+            if (code.includes("t.minimatch.Minimatch=") && !code.includes("t.Minimatch=t.minimatch.Minimatch=")) {
+              code = code.replaceAll("t.minimatch.Minimatch=", "t.Minimatch=t.minimatch.Minimatch=");
+              fs.writeFileSync(filePath, code);
+            }
+          } catch {}
+        }
+      }
+    }
+  }
+}
+' 2>/dev/null || true
+
+# 4. Sanitize persisted window states on macOS to ensure no windows restore in buggy fullscreen
+node -e '
+const fs = require("fs");
+const path = require("path");
+const dbPath = path.join(process.env.HOME, "Library/Application Support/code-oss-dev/User/globalStorage/storage.json");
+if (fs.existsSync(dbPath)) {
+  try {
+    const data = JSON.parse(fs.readFileSync(dbPath, "utf8"));
+    let modified = false;
+    if (data.windowsState) {
+      if (Array.isArray(data.windowsState.openedWindows)) {
+        for (const win of data.windowsState.openedWindows) {
+          if (win.uiState && win.uiState.mode === 3) {
+            win.uiState.mode = 1;
+            modified = true;
+          }
+        }
+      }
+      if (data.windowsState.lastActiveWindow?.uiState?.mode === 3) {
+        data.windowsState.lastActiveWindow.uiState.mode = 1;
+        modified = true;
+      }
+    }
+    if (modified) {
+      fs.writeFileSync(dbPath, JSON.stringify(data, null, 2) + "\n");
+    }
+  } catch {}
+}
+' 2>/dev/null || true
+
+# 5. Extension arguments
+EXTENSIONS_ARG=""
+if [ -d "$HOME/.vscode/extensions" ]; then
+	EXTENSIONS_ARG="--extensions-dir=$HOME/.vscode/extensions"
+fi
+
+# 6. Filter macOS Process Serial Number (-psn_...) passed by Finder on open
+CLEAN_ARGS=()
+for arg in "$@"; do
+  if [[ "$arg" =~ ^-psn_ ]]; then
+    continue
+  fi
+  CLEAN_ARGS+=("$arg")
+done
+
+# 7. Locate Electron binary
+ELECTRON="$REPO_DIR/.build/electron/Code - OSS.app/Contents/MacOS/Code - OSS"
+if [ ! -f "$ELECTRON" ]; then
+  ELECTRON="$CONTENTS_DIR/MacOS/Code - OSS"
+fi
+
+# Resource flags: disable dev shm usage
+cd "$REPO_DIR"
+
+exec "$ELECTRON" \
+  . \
+  --disable-dev-shm-usage \
+  --disable-extension=vscode.vscode-api-tests \
+  $EXTENSIONS_ARG \
+  "${CLEAN_ARGS[@]}"

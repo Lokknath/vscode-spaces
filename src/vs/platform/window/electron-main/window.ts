@@ -76,6 +76,8 @@ export interface ICodeWindow extends IBaseWindow {
 
 	readonly remoteAuthority?: string;
 
+	readonly isInitialStartup?: boolean;
+
 	readonly iconPath?: URI;
 
 	readonly isExtensionDevelopmentHost: boolean;

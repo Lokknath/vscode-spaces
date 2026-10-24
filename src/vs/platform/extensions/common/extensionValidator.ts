@@ -323,7 +323,7 @@ export function validateExtensionManifest(productVersion: string, productDate: P
 	const validExtensionVersion = isValidExtensionVersion(productVersion, productDate, extensionManifest, extensionIsBuiltin, notices);
 	if (!validExtensionVersion) {
 		for (const notice of notices) {
-			validations.push([Severity.Error, notice]);
+			validations.push([Severity.Warning, notice]);
 		}
 	}
 

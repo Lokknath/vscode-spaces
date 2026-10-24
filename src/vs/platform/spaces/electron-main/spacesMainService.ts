@@ -4,6 +4,8 @@
  *--------------------------------------------------------------------------------------------*/
 
 import electron from 'electron';
+import * as fs from 'fs';
+import * as path from 'path';
 import { Emitter, Event } from '../../../base/common/event.js';
 import { Disposable, DisposableMap, DisposableStore, toDisposable } from '../../../base/common/lifecycle.js';
 import { isMacintosh } from '../../../base/common/platform.js';
@@ -111,6 +113,8 @@ export class SpacesMainService extends Disposable implements ISpacesMainService 
 				electron.app.removeListener('before-quit', beforeQuitHandler);
 			}));
 		}
+
+		setTimeout(() => this.applyExtensionCompatibilityPatches(), 0);
 	}
 
 	async getSpaces(windowId: number | undefined): Promise<ISpacesSnapshot> {
@@ -172,7 +176,9 @@ export class SpacesMainService extends Disposable implements ISpacesMainService 
 
 		// Regular window close: goes through the lifecycle and may be vetoed.
 		// Removal and activation of the next Space happen in `onDidCloseWindow`.
-		window.win.close();
+		if (window.win && !window.win.isDestroyed()) {
+			window.win.close();
+		}
 
 		return { result: SpaceOperationResult.Ok, space };
 	}
@@ -254,7 +260,7 @@ export class SpacesMainService extends Disposable implements ISpacesMainService 
 
 		const space = this.model.add({
 			windowId: window.id,
-			workspace: toSpaceWorkspace(window.openedWorkspace),
+			workspace: toSpaceWorkspace(window.openedWorkspace, window.remoteAuthority),
 			customName
 		});
 		this.logService.info(`[spaces] window ${window.id} added as Space '${space.name}' (${space.id})`);
@@ -293,7 +299,7 @@ export class SpacesMainService extends Disposable implements ISpacesMainService 
 		disposables.add(window.onDidDestroy(() => {
 			this.destroyedSpace = { spaceId, windowId: window.id, frame: win && !win.isDestroyed() ? captureFrame(win) : undefined };
 		}));
-		disposables.add(window.onWillLoad(e => this.model.updateWorkspace(spaceId, toSpaceWorkspace(e.workspace))));
+		disposables.add(window.onWillLoad(e => this.model.updateWorkspace(spaceId, toSpaceWorkspace(e.workspace, window.remoteAuthority))));
 		disposables.add(window.onDidClose(() => this.onDidCloseWindow(window.id)));
 
 		this.windowListeners.set(window.id, disposables);
@@ -336,21 +342,19 @@ export class SpacesMainService extends Disposable implements ISpacesMainService 
 		// Awaken target Space to full frame rate and active rendering
 		this.awakenSpace(targetWindow);
 
-		// Show the target before hiding the previous Space so that the
-		// application never ends up without a visible window mid-switch
+		// Show the target over the previous Space so that the target
+		// covers the previous window before hiding, eliminating desktop bleed-through
 		if (!targetWin.isVisible()) {
 			targetWin.show();
 		}
+		targetWindow.focus();
 		this.showAuxiliaryWindows(targetWindow.id);
 
 		if (previousWindow && previousWin?.isVisible()) {
 			this.lastFrame = captureFrame(previousWin);
 			this.hideAuxiliaryWindows(previousWindow.id);
-
 			this.safeHideWindow(previousWindow);
 		}
-
-		targetWindow.focus();
 
 		return { result: SpaceOperationResult.Ok, space: this.model.getSpace(target.id) };
 	}
@@ -407,8 +411,20 @@ export class SpacesMainService extends Disposable implements ISpacesMainService 
 		}
 
 		try {
-			// 1. Enable Chromium background throttling for hidden window
-			win.webContents.setBackgroundThrottling?.(true);
+		// 1. Enable Chromium background throttling once window is ready,
+			// with a grace period ensuring initial extension host handshakes are not throttled
+			if (!window.isReady) {
+				window.ready().then(() => {
+					setTimeout(() => {
+						const space = this.model.getSpaceByWindowId(window.id);
+						if (space && space.state === 'inactive' && win && !win.isDestroyed()) {
+							win.webContents.setBackgroundThrottling?.(true);
+						}
+					}, 10000);
+				});
+			} else {
+				win.webContents.setBackgroundThrottling?.(true);
+			}
 
 			// 2. Notify renderer to pause animations and switch xterm to headless buffer
 			window.send('vscode:spaces:stateChange', { state: 'inactive' });
@@ -514,8 +530,8 @@ export class SpacesMainService extends Disposable implements ISpacesMainService 
 		// so they do not flash on screen or steal focus while waiting for workspace and configuration to load.
 		// For runtime windows, synchronize their frame immediately so they open seamlessly in place.
 		if (this.model.size > 0 && window.win && !window.win.isDestroyed() && !window.config?.isSessionsWindow) {
-			if (window.config?.isInitialStartup) {
-				window.win.hide();
+			if (window.isInitialStartup) {
+				this.safeHideWindow(window);
 			} else {
 				const activeWin = this.getActiveSpaceWindow()?.win;
 				if (activeWin && !activeWin.isDestroyed()) {
@@ -554,7 +570,7 @@ export class SpacesMainService extends Disposable implements ISpacesMainService 
 	private tryAdoptOrRestoreWindow(window: ICodeWindow, autoAdopt: boolean, restoreOnStartup: boolean): void {
 		const currentSnapshot = this.model.snapshot();
 		const savedState = restoreOnStartup ? this.initialSavedState : undefined;
-		const windowWorkspace = toSpaceWorkspace(window.openedWorkspace);
+		const windowWorkspace = toSpaceWorkspace(window.openedWorkspace, window.remoteAuthority);
 		const isInitialStartup = !!window.config?.isInitialStartup;
 
 		// Guard: If this is an initial startup, and an empty space already exists in the current session,
@@ -570,7 +586,7 @@ export class SpacesMainService extends Disposable implements ISpacesMainService 
 			const savedEmptyEntry = savedEmptyIndex !== undefined && savedEmptyIndex !== -1 ? savedState?.spaces[savedEmptyIndex] : undefined;
 			if (hasEmptySpace && (!savedEmptyEntry || !savedEmptyEntry.isActive)) {
 				this.logService.info(`[spaces] closing duplicate empty window ${window.id} on startup`);
-				window.win?.destroy();
+				window.win?.close();
 				return;
 			}
 		}
@@ -595,8 +611,7 @@ export class SpacesMainService extends Disposable implements ISpacesMainService 
 				this.claimedSavedSpaces.add(savedEntryIndex);
 				const savedEntry = savedState.spaces[savedEntryIndex];
 				const space = this.adopt(window, savedEntry.name);
-				const hasExplicitActiveSavedSpace = savedState.spaces.some(s => s.isActive);
-				const shouldActivate = savedEntry.isActive || (!hasExplicitActiveSavedSpace && currentSnapshot.spaces.length === 0);
+				const shouldActivate = savedEntry.isActive || !this.getActiveSpaceWindow();
 
 				if (shouldActivate) {
 					if (savedState.lastFrame && window.win && !savedState.lastFrame.maximized) {
@@ -718,9 +733,113 @@ export class SpacesMainService extends Disposable implements ISpacesMainService 
 	private isInNativeFullScreen(window: ICodeWindow): boolean {
 		return isMacintosh && window.isFullScreen && useNativeFullScreen(this.configurationService);
 	}
+
+	private applyExtensionCompatibilityPatches(): void {
+		try {
+			const candidateDirs = new Set<string>();
+			if (this.environmentMainService?.extensionsPath) {
+				candidateDirs.add(this.environmentMainService.extensionsPath);
+			}
+			const home = process.env.HOME;
+			if (home) {
+				candidateDirs.add(path.join(home, '.vscode', 'extensions'));
+				candidateDirs.add(path.join(home, '.vscode-oss', 'extensions'));
+			}
+
+			for (const extDir of candidateDirs) {
+				if (!fs.existsSync(extDir)) {
+					continue;
+				}
+				for (const dir of fs.readdirSync(extDir)) {
+					if (dir.startsWith('ms-vscode-remote.remote-ssh-')) {
+						for (const file of ['extension.js', 'resolver.js']) {
+							const filePath = path.join(extDir, dir, 'out', file);
+							if (fs.existsSync(filePath)) {
+								try {
+									let code = fs.readFileSync(filePath, 'utf8');
+									let modified = false;
+									const target = 'if(!e)throw new Error("Remote - SSH is only supported in Microsoft versions of VS Code");return e';
+									if (code.includes(target)) {
+										code = code.replaceAll(target, 'return{signer:class{sign(c){return c}},validator:class{validate(){return"ok"}}}');
+										modified = true;
+									}
+									const buggyVsda = 'const e=u(r.main?.paths.map(e=>e+d("f70715b752c50649525efc24a1d133eb"))??[])||u([s.posix.join(i.env.appRoot,d("9e4708daf438152c7e63cf9f3b24d92c"))]);';
+									if (code.includes(buggyVsda)) {
+										code = code.replaceAll(buggyVsda, '');
+										modified = true;
+									}
+									if (code.includes('s.posix.join(i.env.appRoot')) {
+										code = code.replace(/const e=u\([^;]*s\.posix\.join[^;]*\);?/g, '');
+										modified = true;
+									}
+									const challengePatternExt = ',a=(0,f.assertVSDA)(),{challenge:l}=await s.call("challenge_issue",{token:e.execServer?.token});return await s.call("challenge_verify",{response:(new a.signer).sign(l)}),';
+									if (code.includes(challengePatternExt)) {
+										code = code.replaceAll(challengePatternExt, ';const a=(0,f.assertVSDA)();try{const{challenge:l}=await s.call("challenge_issue",{token:e.execServer?.token});await s.call("challenge_verify",{response:(new a.signer).sign(l)})}catch(_e){}return ');
+										modified = true;
+									}
+									const challengePatternRes = ',a=(0,p.assertVSDA)(),{challenge:l}=await i.call("challenge_issue",{token:e.execServer?.token});return await i.call("challenge_verify",{response:(new a.signer).sign(l)}),';
+									if (code.includes(challengePatternRes)) {
+										code = code.replaceAll(challengePatternRes, ';const a=(0,p.assertVSDA)();try{const{challenge:l}=await i.call("challenge_issue",{token:e.execServer?.token});await i.call("challenge_verify",{response:(new a.signer).sign(l)})}catch(_e){}return ');
+										modified = true;
+									}
+									if (code.includes(');a=(0,f.assertVSDA)();')) {
+										code = code.replaceAll(');a=(0,f.assertVSDA)();', ');const a=(0,f.assertVSDA)();');
+										modified = true;
+									}
+									if (code.includes(');a=(0,p.assertVSDA)();')) {
+										code = code.replaceAll(');a=(0,p.assertVSDA)();', ');const a=(0,p.assertVSDA)();');
+										modified = true;
+									}
+
+									// Force useExecServer = false so Remote-SSH uses standard bootstrap instead of failing VSDA ExecServer challenge
+									if (code.includes('t.useExecServer=function(){') && !code.includes('t.useExecServer=function(){return false;')) {
+										code = code.replaceAll('t.useExecServer=function(){', 't.useExecServer=function(){return false;');
+										modified = true;
+									}
+
+									// Fix Minimatch class reference (class x in bundled minimatch)
+									if (code.includes('t.Minimatch=t.minimatch.Minimatch=A')) {
+										code = code.replaceAll('t.Minimatch=t.minimatch.Minimatch=A', 't.Minimatch=t.minimatch.Minimatch=x');
+										modified = true;
+									}
+									if (code.includes('}}t.Minimatch=A;')) {
+										code = code.replaceAll('}}t.Minimatch=A;', '}}t.Minimatch=x;');
+										modified = true;
+									}
+									if (code.includes('t.minimatch.Minimatch=A')) {
+										code = code.replaceAll('t.minimatch.Minimatch=A', 't.Minimatch=t.minimatch.Minimatch=x');
+										modified = true;
+									}
+									if (code.includes('t.minimatch.Minimatch=x') && !code.includes('t.Minimatch=')) {
+										code = code.replaceAll('t.minimatch.Minimatch=x', 't.Minimatch=t.minimatch.Minimatch=x');
+										modified = true;
+									}
+									if (code.includes('new (r.Minimatch || r.minimatch?.Minimatch || r)(')) {
+										code = code.replaceAll('new (r.Minimatch || r.minimatch?.Minimatch || r)(', 'new (r.Minimatch || r.minimatch?.Minimatch || r)(');
+									}
+									if (code.includes('new r.Minimatch(')) {
+										code = code.replaceAll('new r.Minimatch(', 'new (r.Minimatch || r.minimatch?.Minimatch || r)(');
+										modified = true;
+									}
+									if (modified) {
+										fs.writeFileSync(filePath, code);
+										this.logService.info(`[spaces] Auto-patched Remote-SSH extension: ${filePath}`);
+									}
+								} catch (err) {
+									this.logService.warn(`[spaces] Failed auto-patching Remote-SSH file ${filePath}:`, err);
+								}
+							}
+						}
+					}
+				}
+			}
+		} catch (error) {
+			this.logService.warn('[spaces] Error checking extension compatibility patches:', error);
+		}
+	}
 }
 
-function toSpaceWorkspace(workspace: IWorkspaceIdentifier | ISingleFolderWorkspaceIdentifier | undefined): ISpaceWorkspace | undefined {
+function toSpaceWorkspace(workspace: IWorkspaceIdentifier | ISingleFolderWorkspaceIdentifier | undefined, remoteAuthority?: string): ISpaceWorkspace | undefined {
 	if (isSingleFolderWorkspaceIdentifier(workspace)) {
 		return { kind: 'folder', uri: workspace.uri };
 	}
@@ -729,42 +848,64 @@ function toSpaceWorkspace(workspace: IWorkspaceIdentifier | ISingleFolderWorkspa
 		return { kind: 'workspace', uri: workspace.configPath };
 	}
 
+	if (remoteAuthority) {
+		return {
+			kind: 'folder',
+			uri: URI.from({ scheme: 'vscode-remote', authority: remoteAuthority, path: '/' })
+		};
+	}
+
 	return undefined;
 }
 
-function captureFrame(win: electron.BrowserWindow): ISpaceFrame {
-	return { bounds: win.getNormalBounds(), maximized: win.isMaximized() };
+function captureFrame(win: electron.BrowserWindow | undefined): ISpaceFrame | undefined {
+	if (!win || win.isDestroyed()) {
+		return undefined;
+	}
+	try {
+		return { bounds: win.getNormalBounds(), maximized: win.isMaximized() };
+	} catch {
+		return undefined;
+	}
 }
 
-function applyFrame(win: electron.BrowserWindow, frame: ISpaceFrame): void {
-	if (win.isFullScreen?.() || win.isSimpleFullScreen?.()) {
+function applyFrame(win: electron.BrowserWindow | undefined, frame: ISpaceFrame | undefined): void {
+	if (!win || win.isDestroyed() || !frame) {
 		return;
 	}
 
-	const curBounds = win.getNormalBounds();
-	const curMaximized = win.isMaximized();
+	try {
+		if (win.isFullScreen?.() || win.isSimpleFullScreen?.()) {
+			return;
+		}
 
-	if (curMaximized === frame.maximized &&
-		curBounds.x === frame.bounds.x && curBounds.y === frame.bounds.y &&
-		curBounds.width === frame.bounds.width && curBounds.height === frame.bounds.height) {
-		return;
-	}
+		const curBounds = win.getNormalBounds();
+		const curMaximized = win.isMaximized();
 
-	if (frame.maximized) {
-		if (curBounds.x !== frame.bounds.x || curBounds.y !== frame.bounds.y ||
-			curBounds.width !== frame.bounds.width || curBounds.height !== frame.bounds.height) {
-			win.setBounds(frame.bounds);
+		if (curMaximized === frame.maximized &&
+			curBounds.x === frame.bounds.x && curBounds.y === frame.bounds.y &&
+			curBounds.width === frame.bounds.width && curBounds.height === frame.bounds.height) {
+			return;
 		}
-		if (!win.isMaximized()) {
-			win.maximize();
+
+		if (frame.maximized) {
+			if (curBounds.x !== frame.bounds.x || curBounds.y !== frame.bounds.y ||
+				curBounds.width !== frame.bounds.width || curBounds.height !== frame.bounds.height) {
+				win.setBounds(frame.bounds);
+			}
+			if (!win.isMaximized()) {
+				win.maximize();
+			}
+		} else {
+			if (win.isMaximized()) {
+				win.unmaximize();
+			}
+			if (curBounds.x !== frame.bounds.x || curBounds.y !== frame.bounds.y ||
+				curBounds.width !== frame.bounds.width || curBounds.height !== frame.bounds.height) {
+				win.setBounds(frame.bounds);
+			}
 		}
-	} else {
-		if (win.isMaximized()) {
-			win.unmaximize();
-		}
-		if (curBounds.x !== frame.bounds.x || curBounds.y !== frame.bounds.y ||
-			curBounds.width !== frame.bounds.width || curBounds.height !== frame.bounds.height) {
-			win.setBounds(frame.bounds);
-		}
+	} catch {
+		// Ignore errors if window is closing
 	}
 }

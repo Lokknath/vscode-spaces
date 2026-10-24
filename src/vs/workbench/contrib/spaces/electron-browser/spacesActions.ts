@@ -328,7 +328,7 @@ export class AddNewSpaceAction extends Action2 {
 
 		const pick = await quickInputService.pick(items, {
 			title: localize('spaces.addNewSpaceTitle', "Add New Space"),
-			placeholder: localize('spaces.addNewSpacePlaceholder', "Select how you would like to create a new Space")
+			placeHolder: localize('spaces.addNewSpacePlaceholder', "Select how you would like to create a new Space")
 		});
 
 		if (pick) {
@@ -373,7 +373,7 @@ export class RemoveSpaceAction extends Action2 {
 
 		const pick = await quickInputService.pick(items, {
 			title: localize('spaces.removeSpaceTitle', "Remove Space"),
-			placeholder: localize('spaces.removeSpacePlaceholder', "Select a Space to close and remove...")
+			placeHolder: localize('spaces.removeSpacePlaceholder', "Select a Space to close and remove...")
 		});
 
 		if (pick) {
@@ -568,7 +568,7 @@ export class ShowSpacesShortcutsAction extends Action2 {
 			readonly commandId?: SpacesCommandId | string;
 		}
 
-		const items: IShortcutPickItem[] = [
+		const items: (IShortcutPickItem | IQuickPickSeparator)[] = [
 			{ type: 'separator', label: localize('spaces.shortcuts.navCategory', "Navigation & Switching") },
 			{
 				label: `$(${Codicon.arrowSwap.id}) Switch Space...`,
@@ -795,11 +795,11 @@ export class CreateWorktreeSpaceAction extends Action2 {
 
 		try {
 			const terminal = await terminalService.createTerminal({
-				name: `Git Worktree: ${cleanBranch}`,
+				config: { name: `Git Worktree: ${cleanBranch}` },
 				cwd: repoDir
 			});
 			terminalService.setActiveInstance(terminal);
-			terminal.sendText(`git worktree add -b ${cleanBranch} "${worktreePath}" || git worktree add "${worktreePath}" ${cleanBranch}`);
+			terminal.sendText(`git worktree add -b ${cleanBranch} "${worktreePath}" || git worktree add "${worktreePath}" ${cleanBranch}`, true);
 
 			// Give the worktree command a moment to initiate the directory, then open as space
 			setTimeout(async () => {

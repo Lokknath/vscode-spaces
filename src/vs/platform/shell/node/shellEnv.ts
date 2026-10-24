@@ -8,7 +8,7 @@ import { basename } from '../../../base/common/path.js';
 import { localize } from '../../../nls.js';
 import { CancellationToken, CancellationTokenSource } from '../../../base/common/cancellation.js';
 import { toErrorMessage } from '../../../base/common/errorMessage.js';
-import { CancellationError, isCancellationError } from '../../../base/common/errors.js';
+import { CancellationError } from '../../../base/common/errors.js';
 import { IProcessEnvironment, isWindows, OS } from '../../../base/common/platform.js';
 import { generateUuid } from '../../../base/common/uuid.js';
 import { getSystemShell } from '../../../base/node/shell.js';
@@ -71,23 +71,23 @@ export async function getResolvedShellEnv(configurationService: IConfigurationSe
 				const configuredTimeoutValue = configurationService.getValue<unknown>('application.shellEnvironmentResolutionTimeout');
 				if (typeof configuredTimeoutValue === 'number') {
 					timeoutValue = clamp(configuredTimeoutValue, 1, 120) * 1000 /* convert from seconds */;
+				} else if (process.env['PATH']) {
+					timeoutValue = 2500; // accelerate resolution when PATH is already available in process.env
 				}
 
-				// Give up resolving shell env after some time
+				// Give up resolving shell env after some time, fallback to process.env gracefully
 				const timeout = setTimeout(() => {
 					cts.dispose(true);
-					reject(new Error(localize('resolveShellEnvTimeout', "Unable to resolve your shell environment in a reasonable time. Please review your shell configuration and restart.")));
+					logService.warn('resolveShellEnv(): resolution timed out, falling back to process.env');
+					resolve(process.env);
 				}, timeoutValue);
 
 				// Resolve shell env and handle errors
 				try {
 					resolve(await doResolveUnixShellEnv(logService, cts.token));
 				} catch (error) {
-					if (!isCancellationError(error) && !cts.token.isCancellationRequested) {
-						reject(new Error(localize('resolveShellEnvError', "Unable to resolve your shell environment: {0}", toErrorMessage(error))));
-					} else {
-						resolve({});
-					}
+					logService.warn('resolveShellEnv(): resolution failed, falling back to process.env', error);
+					resolve(process.env);
 				} finally {
 					clearTimeout(timeout);
 					cts.dispose();
@@ -141,7 +141,7 @@ async function doResolveUnixShellEnv(logService: ILogService, token: Cancellatio
 			command = `import os, json; print("${mark}", json.dumps(dict(os.environ)), "${mark}")`;
 			shellArgs = ['-i', '-l', '-c'];
 		} else {
-			command = `'${process.execPath}' ${extraArgs} -p '"${mark}" + JSON.stringify(process.env) + "${mark}"'`;
+			command = `ELECTRON_RUN_AS_NODE=1 '${process.execPath}' ${extraArgs} -p '"${mark}" + JSON.stringify(process.env) + "${mark}"'`;
 
 			if (name === 'tcsh' || name === 'csh') {
 				shellArgs = ['-ic'];

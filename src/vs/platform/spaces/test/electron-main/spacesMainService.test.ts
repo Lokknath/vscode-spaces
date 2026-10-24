@@ -6,7 +6,6 @@
 import assert from 'assert';
 import { Emitter } from '../../../../base/common/event.js';
 import { DisposableStore } from '../../../../base/common/lifecycle.js';
-import { isMacintosh } from '../../../../base/common/platform.js';
 import { URI } from '../../../../base/common/uri.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/common/utils.js';
 import { IAuxiliaryWindowsMainService } from '../../../auxiliaryWindow/electron-main/auxiliaryWindows.js';
@@ -123,6 +122,8 @@ class FakeCodeWindow {
 	readonly isExtensionTestHost = false;
 	readonly config = { isSessionsWindow: false };
 	isFullScreen = false;
+	isReady = true;
+	ready(): Promise<any> { return Promise.resolve(this); }
 	openedWorkspace: ISingleFolderWorkspaceIdentifier | undefined;
 	focusCalls = 0;
 
@@ -560,7 +561,7 @@ suite('SpacesMainService', () => {
 	});
 
 	test('persists spaces state and restores saved spaces on startup', async () => {
-		const { a, b } = await createTwoSpaces();
+		await createTwoSpaces();
 		const saved = stateService.getItem<any>('spaces.state');
 		assert.ok(saved);
 		assert.strictEqual(saved.spaces.length, 2);

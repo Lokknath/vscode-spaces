@@ -1029,6 +1029,7 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 					lastSessionWindows.push(this.windowsStateHandler.state.lastActiveWindow);
 				}
 
+				let restoredEmptyWindow = false;
 				const pathsToOpen = await Promise.all(lastSessionWindows.map(async lastSessionWindow => {
 
 					// Workspaces
@@ -1047,9 +1048,13 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 						}
 					}
 
-					// Empty window, potentially editors open to be restored
+					// Empty window, potentially editors open to be restored (guard against restoring duplicate empty windows)
 					else if (restoreWindowsSetting !== 'folders' && lastSessionWindow.backupPath) {
-						return { backupPath: lastSessionWindow.backupPath, remoteAuthority: lastSessionWindow.remoteAuthority };
+						const hasBackups = this.backupMainService.getEmptyWindowBackups().some(b => b.backupFolder === basename(lastSessionWindow.backupPath!));
+						if (hasBackups || !restoredEmptyWindow) {
+							restoredEmptyWindow = true;
+							return { backupPath: lastSessionWindow.backupPath, remoteAuthority: lastSessionWindow.remoteAuthority };
+						}
 					}
 
 					return undefined;
@@ -1603,11 +1608,15 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 
 			// Create the window
 			mark('code/willCreateCodeWindow');
+			const isSecondaryStartupWindow = !!configuration.isInitialStartup && this.getWindowCount() > 0;
 			const createdWindow = window = this.instantiationService.createInstance(CodeWindow, {
 				state,
 				extensionDevelopmentPath: configuration.extensionDevelopmentPath,
 				isExtensionTestHost: !!configuration.extensionTestsPath,
-				isSessionsWindow: configuration.isSessionsWindow
+				isSessionsWindow: configuration.isSessionsWindow,
+				isInitialStartup: configuration.isInitialStartup,
+				dontShow: isSecondaryStartupWindow,
+				remoteAuthority: configuration.remoteAuthority
 			});
 			mark('code/didCreateCodeWindow');
 

@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
 #
-# Launcher for VS Code Spaces with Resource Optimization Engine
-# Usage:
-#   ./code-spaces             # Launch with default / last session
-#   ./code-spaces <folder>    # Launch with a specific repository folder
+# VS Code Spaces CLI Launcher
+#
 
 export VSCODE_SKIP_NODE_VERSION_CHECK=1
 export VSCODE_SKIP_PRELAUNCH=1
@@ -15,7 +13,10 @@ while [ -h "$SOURCE" ]; do
 done
 ROOT="$( cd -P "$( dirname "$SOURCE" )" >/dev/null 2>&1 && pwd )"
 
-# Ensure user settings have Spaces settings enabled in both dev paths
+# Augment PATH so system tools & homebrew node are available
+export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH"
+
+# Ensure user settings have Spaces settings enabled
 for USER_SETTINGS in "$HOME/Library/Application Support/code-oss-dev/User/settings.json" "$HOME/.vscode-oss-dev/data/User/settings.json"; do
 	mkdir -p "$(dirname "$USER_SETTINGS")"
 	node -e "
@@ -29,58 +30,42 @@ for USER_SETTINGS in "$HOME/Library/Application Support/code-oss-dev/User/settin
 		s['workbench.experimental.spaces.restoreOnStartup'] = true;
 		s['workbench.experimental.spaces.focusEditorOnSwitch'] = true;
 		s['workbench.experimental.spaces.refreshTerminalsOnSwitch'] = true;
-		s['window.nativeFullScreen'] = true;
+		s['window.nativeFullScreen'] = false;
 		s['window.titleBarStyle'] = 'custom';
 		if (!s['window.restoreWindows']) s['window.restoreWindows'] = 'preserve';
+		s['remote.SSH.useExecServer'] = false;
 		fs.writeFileSync(p, JSON.stringify(s, null, '\t') + '\n');
 	" "$USER_SETTINGS" 2>/dev/null || true
 done
 
-# Ensure language service dependencies have CommonJS compatibility for Node 26
-node -e "
-const fs = require('fs');
-const path = require('path');
-const root = process.argv[1];
-const pkgs = [
-  path.join(root, 'extensions/json-language-features/server/node_modules/vscode-json-languageservice/package.json'),
-  path.join(root, 'extensions/css-language-features/server/node_modules/vscode-css-languageservice/package.json'),
-  path.join(root, 'extensions/html-language-features/server/node_modules/vscode-css-languageservice/package.json')
-];
-for (const p of pkgs) {
-  try {
-    if (fs.existsSync(p)) {
-      const data = JSON.parse(fs.readFileSync(p, 'utf8'));
-      if (data.exports && data.exports['.'] && !data.exports['.'].default) {
-        data.exports['.'].default = data.exports['.'].import;
-        data.main = data.exports['.'].import;
-        fs.writeFileSync(p, JSON.stringify(data, null, 2) + '\n');
-      }
-    }
-  } catch {}
-}
-" "$ROOT" 2>/dev/null || true
-
-# Auto-patch Microsoft Remote - SSH extension if present to allow execution in Spaces
+# Sanitize persisted window states on macOS: eliminate duplicate empty windows and prevent native fullscreen glitch
 node -e '
 const fs = require("fs");
 const path = require("path");
-const extDir = path.join(process.env.HOME, ".vscode", "extensions");
-if (fs.existsSync(extDir)) {
-  for (const dir of fs.readdirSync(extDir)) {
-    if (dir.startsWith("ms-vscode-remote.remote-ssh-")) {
-      for (const file of ["extension.js", "resolver.js"]) {
-        const filePath = path.join(extDir, dir, "out", file);
-        if (fs.existsSync(filePath)) {
+const os = require("os");
+
+// 1. Patch Remote-SSH extension for Code OSS compatibility (disable ExecServer & fix minimatch)
+for (const extBase of [path.join(os.homedir(), ".vscode", "extensions"), path.join(os.homedir(), ".vscode-oss", "extensions")]) {
+  if (!fs.existsSync(extBase)) continue;
+  for (const entry of fs.readdirSync(extBase)) {
+    if (entry.startsWith("ms-vscode-remote.remote-ssh-")) {
+      const outDir = path.join(extBase, entry, "out");
+      for (const f of ["extension.js", "resolver.js"]) {
+        const fp = path.join(outDir, f);
+        if (fs.existsSync(fp)) {
           try {
-            let code = fs.readFileSync(filePath, "utf8");
-            const target = "if(!e)throw new Error(\"Remote - SSH is only supported in Microsoft versions of VS Code\");return e";
-            if (code.includes(target)) {
-              code = code.replaceAll(target, "return{signer:class{sign(c){return c}},validator:class{validate(){return\"ok\"}}}");
-              fs.writeFileSync(filePath, code);
+            let code = fs.readFileSync(fp, "utf8");
+            let mod = false;
+            if (code.includes("t.Minimatch=t.minimatch.Minimatch=A")) {
+              code = code.replaceAll("t.Minimatch=t.minimatch.Minimatch=A", "t.Minimatch=t.minimatch.Minimatch=x");
+              mod = true;
             }
-            if (code.includes("t.minimatch.Minimatch=") && !code.includes("t.Minimatch=t.minimatch.Minimatch=")) {
-              code = code.replaceAll("t.minimatch.Minimatch=", "t.Minimatch=t.minimatch.Minimatch=");
-              fs.writeFileSync(filePath, code);
+            if (code.includes("t.useExecServer=function(){") && !code.includes("t.useExecServer=function(){return false;")) {
+              code = code.replaceAll("t.useExecServer=function(){", "t.useExecServer=function(){return false;");
+              mod = true;
+            }
+            if (mod) {
+              fs.writeFileSync(fp, code, "utf8");
             }
           } catch {}
         }
@@ -88,42 +73,86 @@ if (fs.existsSync(extDir)) {
     }
   }
 }
-' 2>/dev/null || true
 
-# Sanitize persisted window states on macOS to ensure no windows restore in buggy native fullscreen
-node -e '
-const fs = require("fs");
-const path = require("path");
-const dbPath = path.join(process.env.HOME, "Library/Application Support/code-oss-dev/User/globalStorage/storage.json");
-if (fs.existsSync(dbPath)) {
-  try {
-    const data = JSON.parse(fs.readFileSync(dbPath, "utf8"));
-    let modified = false;
-    if (data.windowsState) {
-      if (Array.isArray(data.windowsState.openedWindows)) {
-        for (const win of data.windowsState.openedWindows) {
-          if (win.uiState && win.uiState.mode === 3) {
-            win.uiState.mode = 1;
+// 2. Sanitize persisted window states
+for (const appDir of ["code-oss-dev", "code-spaces"]) {
+  const dbPath = path.join(process.env.HOME, "Library/Application Support", appDir, "User/globalStorage/storage.json");
+  if (fs.existsSync(dbPath)) {
+    try {
+      const data = JSON.parse(fs.readFileSync(dbPath, "utf8"));
+      let modified = false;
+      if (data.windowsState) {
+        if (Array.isArray(data.windowsState.openedWindows)) {
+          // Remove duplicate empty windows without folders or workspaces
+          const withContent = data.windowsState.openedWindows.filter(w => w.folderUri || w.workspace);
+          const emptyWins = data.windowsState.openedWindows.filter(w => !w.folderUri && !w.workspace);
+          const sanitized = withContent.length > 0 ? withContent : emptyWins.slice(0, 1);
+          if (sanitized.length !== data.windowsState.openedWindows.length) {
+            data.windowsState.openedWindows = sanitized;
             modified = true;
           }
+          for (const win of data.windowsState.openedWindows) {
+            if (win.uiState && win.uiState.mode === 3) {
+              win.uiState.mode = 1;
+              modified = true;
+            }
+          }
+        }
+        if (data.windowsState.lastActiveWindow?.uiState?.mode === 3) {
+          data.windowsState.lastActiveWindow.uiState.mode = 1;
+          modified = true;
         }
       }
-      if (data.windowsState.lastActiveWindow?.uiState?.mode === 3) {
-        data.windowsState.lastActiveWindow.uiState.mode = 1;
-        modified = true;
+      if (modified) {
+        fs.writeFileSync(dbPath, JSON.stringify(data, null, 2) + "\n");
       }
-    }
-    if (modified) {
-      fs.writeFileSync(dbPath, JSON.stringify(data, null, 2) + "\n");
-    }
-  } catch {}
+    } catch {}
+  }
 }
 ' 2>/dev/null || true
 
-# Pass user extensions directory so all existing VS Code extensions are loaded in Spaces
-EXTENSIONS_ARG=""
-if [ -d "$HOME/.vscode/extensions" ]; then
-	EXTENSIONS_ARG="--extensions-dir=$HOME/.vscode/extensions"
+# Locate Electron executable (prefer installed canonical app, fallback to local build)
+ELECTRON="/Applications/VS Code Spaces.app/Contents/MacOS/VS Code Spaces"
+if [ ! -f "$ELECTRON" ]; then
+	ELECTRON="$ROOT/.build/electron/VS Code Spaces.app/Contents/MacOS/VS Code Spaces"
+fi
+if [ ! -f "$ELECTRON" ]; then
+	ELECTRON="$ROOT/.build/electron/Code - OSS.app/Contents/MacOS/Code - OSS"
+fi
+if [ ! -f "$ELECTRON" ]; then
+	ELECTRON="/Applications/VS Code Spaces.app/Contents/MacOS/Code - OSS"
+fi
+if [ ! -f "$ELECTRON" ]; then
+	ELECTRON="$HOME/Applications/VS Code Spaces.app/Contents/MacOS/VS Code Spaces"
 fi
 
-exec "$ROOT/scripts/code.sh" $EXTENSIONS_ARG "$@"
+if [ ! -f "$ELECTRON" ]; then
+	echo "Error: Electron binary not found. Please build or run npm run electron." >&2
+	exit 1
+fi
+
+CLI="$ROOT/out/cli.js"
+if [ ! -f "$CLI" ]; then
+	CLI="/Applications/VS Code Spaces.app/Contents/Resources/app/out/cli.js"
+fi
+
+# Pass user extensions dir if present
+EXTENSIONS_ARG=()
+if [ -d "$HOME/.vscode/extensions" ]; then
+	EXTENSIONS_ARG=("--extensions-dir=$HOME/.vscode/extensions")
+fi
+
+export NODE_ENV=development
+
+# Resolve any relative file/folder arguments to absolute paths
+RESOLVED_ARGS=()
+for arg in "$@"; do
+	if [ -e "$arg" ]; then
+		RESOLVED_ARGS+=("$(cd "$(dirname "$arg")" && pwd)/$(basename "$arg")")
+	else
+		RESOLVED_ARGS+=("$arg")
+	fi
+done
+
+ELECTRON_RUN_AS_NODE=1 "$ELECTRON" "$CLI" "${EXTENSIONS_ARG[@]}" "${RESOLVED_ARGS[@]}"
+exit $?

@@ -124,7 +124,11 @@ export function getDefaultSpaceName(workspace: ISpaceWorkspace | undefined, empt
 	}
 
 	if (!name) {
-		name = workspace.uri.authority || workspace.uri.toString();
+		if (workspace.uri.scheme === 'vscode-remote') {
+			name = 'Remote';
+		} else {
+			name = workspace.uri.authority || workspace.uri.toString();
+		}
 	}
 
 	// Smart Host Naming: append [hostname] for remote SSH or other remote spaces
@@ -132,7 +136,8 @@ export function getDefaultSpaceName(workspace: ISpaceWorkspace | undefined, empt
 		const authority = workspace.uri.authority;
 		if (authority.startsWith('ssh-remote+')) {
 			const host = authority.substring('ssh-remote+'.length);
-			return `${name} [${host}]`;
+			const displayName = name === 'Remote' ? 'SSH' : name;
+			return `${displayName} [${host}]`;
 		}
 		const plusIndex = authority.indexOf('+');
 		if (plusIndex !== -1) {

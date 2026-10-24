@@ -276,8 +276,11 @@ class SpacesStatusContribution extends Disposable implements IWorkbenchContribut
 		this.spacesService.getSpaces().then(snapshot => this.updateStatus(snapshot));
 
 		// Hook direct stateChange IPC from main process for zero-latency awakening
-		const onStateChange = (_event: unknown, data: { state: string }) => {
-			this.handleStateChange(data.state === 'active');
+		const onStateChange = (_event: unknown, ...args: unknown[]) => {
+			const data = args[0] as { state: string } | undefined;
+			if (data) {
+				this.handleStateChange(data.state === 'active');
+			}
 		};
 		ipcRenderer.on('vscode:spaces:stateChange', onStateChange);
 		store.add({ dispose: () => ipcRenderer.removeListener('vscode:spaces:stateChange', onStateChange) });
@@ -328,7 +331,11 @@ class SpacesStatusContribution extends Disposable implements IWorkbenchContribut
 						if (lastDimensions) {
 							instance.layout(lastDimensions);
 						}
-						(instance as any).xterm?.refresh?.();
+						const xterm = (instance as any).xterm;
+						if (xterm?.raw?.refresh) {
+							xterm.raw.refresh(0, xterm.raw.rows - 1);
+						}
+						xterm?.refresh?.();
 					}
 				}
 			}

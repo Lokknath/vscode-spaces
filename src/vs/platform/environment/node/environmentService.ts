@@ -3,7 +3,9 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { existsSync } from 'fs';
 import { homedir, tmpdir } from 'os';
+import { join } from 'path';
 import { NativeParsedArgs } from '../common/argv.js';
 import { IDebugParams } from '../common/environment.js';
 import { AbstractNativeEnvironmentService, parseDebugParams } from '../common/environmentService.js';
@@ -14,6 +16,12 @@ export class NativeEnvironmentService extends AbstractNativeEnvironmentService {
 
 	constructor(args: NativeParsedArgs, productService: IProductService) {
 		const homeDir = homedir();
+		if (!args['extensions-dir'] && !process.env['VSCODE_EXTENSIONS'] && !process.env['VSCODE_PORTABLE']) {
+			const userVscodeExtDir = join(homeDir, '.vscode', 'extensions');
+			if (existsSync(userVscodeExtDir)) {
+				args['extensions-dir'] = userVscodeExtDir;
+			}
+		}
 		super(args, {
 			homeDir,
 			tmpDir: tmpdir(),

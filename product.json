@@ -1,7 +1,9 @@
 {
-	"nameShort": "Code - OSS",
-	"nameLong": "Code - OSS",
-	"applicationName": "code-oss",
+	"nameShort": "VS Code Spaces",
+	"nameLong": "VS Code Spaces",
+	"applicationName": "code-spaces",
+	"commit": "6d62b1d5dace93a33b3a6d3eca1317bd5e15bcb1",
+	"quality": "stable",
 	"dataFolderName": ".vscode-oss",
 	"sharedDataFolderName": ".vscode-oss-shared",
 	"win32MutexName": "vscodeoss",
@@ -11,8 +13,8 @@
 	"serverGreeting": [],
 	"serverLicense": [],
 	"serverLicensePrompt": "",
-	"serverApplicationName": "code-server-oss",
-	"serverDataFolderName": ".vscode-server-oss",
+	"serverApplicationName": "code-server",
+	"serverDataFolderName": ".vscode-server",
 	"tunnelApplicationName": "code-tunnel-oss",
 	"win32DirName": "Microsoft Code OSS",
 	"win32NameVersion": "Microsoft Code OSS",
@@ -25,7 +27,7 @@
 	"win32ShellNameShort": "C&ode - OSS",
 	"win32TunnelServiceMutex": "vscodeoss-tunnelservice",
 	"win32TunnelMutex": "vscodeoss-tunnel",
-	"darwinBundleIdentifier": "com.visualstudio.code.oss",
+	"darwinBundleIdentifier": "com.visualstudio.code.spaces",
 	"darwinProfileUUID": "47827DD9-4734-49A0-AF80-7E19B11495CC",
 	"darwinProfilePayloadUUID": "CF808BE7-53F3-46C6-A7E2-7EDB98A5E959",
 	"linuxIconName": "code-oss",
@@ -35,11 +37,10 @@
 	"electronArtifactFeed": "",
 	"urlProtocol": "code-oss",
 	"agentsTelemetryAppName": "agents",
-	"webviewContentExternalBaseUrlTemplate": "https://{{uuid}}.vscode-cdn.net/insider/ef65ac1ba57f57f2a3961bfe94aa20481caca4c6/out/vs/workbench/contrib/webview/browser/pre/",
+	"webviewContentExternalBaseUrlTemplate": "https://{{uuid}}.vscode-cdn.net/stable/6d62b1d5dace93a33b3a6d3eca1317bd5e15bcb1/out/vs/workbench/contrib/webview/browser/pre/",
 	"extensionsGallery": {
 		"serviceUrl": "https://marketplace.visualstudio.com/_apis/public/gallery",
-		"itemUrl": "https://marketplace.visualstudio.com/items",
-		"controlUrl": "https://az764295.vo.msecnd.net/extensions/marketplace.json"
+		"itemUrl": "https://marketplace.visualstudio.com/items"
 	},
 	"builtInExtensions": [
 		{

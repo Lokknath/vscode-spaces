@@ -132,7 +132,7 @@ export async function main(argv: string[]): Promise<void> {
 		// built, because our location on disk is different if built.
 
 		let cliProcessMain: string;
-		if (process.env['VSCODE_DEV']) {
+		if (existsSync(new URL('./cliProcessMain.js', import.meta.url))) {
 			cliProcessMain = './cliProcessMain.js';
 		} else {
 			cliProcessMain = './vs/code/node/cliProcessMain.js';
@@ -498,6 +498,14 @@ export async function main(argv: string[]): Promise<void> {
 			// `--flag=value` form. See https://github.com/microsoft/vscode/issues/209072.
 			const spawnArgs = isWindows ? combineUriFlags(argv.slice(2)) : argv.slice(2);
 
+			if (env['VSCODE_DEV']) {
+				const curdir = '.';
+				const launchDirIndex = spawnArgs.indexOf(curdir);
+				if (launchDirIndex !== -1) {
+					spawnArgs[launchDirIndex] = resolve(curdir);
+				}
+			}
+
 			// We spawn the resolved executable directly
 			child = spawn(process.execPath, spawnArgs, options);
 		} else {
@@ -513,7 +521,12 @@ export async function main(argv: string[]): Promise<void> {
 			//    This way, Mac does not automatically try to foreground the new instance, which causes
 			//    focusing issues when the new instance only sends data to a previous instance and then closes.
 			const spawnArgs = ['-n', '-g'];
-			spawnArgs.push('-a', process.execPath); // -a opens the given application.
+			let targetApp = process.execPath;
+			const macOsIndex = targetApp.indexOf('/Contents/MacOS/');
+			if (macOsIndex !== -1) {
+				targetApp = targetApp.slice(0, macOsIndex);
+			}
+			spawnArgs.push('-a', targetApp); // -a opens the given application bundle
 
 			if (args.verbose || args.status) {
 				spawnArgs.push('--wait-apps'); // `open --wait-apps`: blocks until the launched app is closed (even if they were already running)

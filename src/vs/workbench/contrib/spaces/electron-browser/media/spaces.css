@@ -70,3 +70,10 @@ body.spaces-inactive .monaco-editor .cursors-layer .cursor {
 	visibility: hidden !important;
 }
 
+body.spaces-inactive *,
+body.spaces-inactive *::before,
+body.spaces-inactive *::after {
+	animation-play-state: paused !important;
+	transition: none !important;
+}
+

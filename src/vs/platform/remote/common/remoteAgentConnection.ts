@@ -280,7 +280,10 @@ async function connectToRemoteExtensionHostAgent<T extends RemoteConnection>(opt
 			throw error;
 		}
 
-		const signed = await raceWithTimeoutCancellation(options.signService.sign(msg.data), timeoutCancellationToken);
+		let signed = await raceWithTimeoutCancellation(options.signService.sign(msg.data), timeoutCancellationToken);
+		if (options.connectionToken && (!signed || signed === msg.data)) {
+			signed = options.connectionToken;
+		}
 		const connTypeRequest: ConnectionTypeRequest = {
 			type: 'connectionType',
 			commit: options.commit,

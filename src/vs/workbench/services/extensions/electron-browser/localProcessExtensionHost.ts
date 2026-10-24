@@ -352,8 +352,14 @@ export class NativeLocalProcessExtensionHost extends Disposable implements IExte
 		// Help in case we fail to start it
 		let startupTimeoutHandle: Timeout | undefined;
 		if (!this._environmentService.isBuilt && !this._environmentService.remoteAuthority || this._isExtensionDevHost) {
+			const timeoutMs = 60000;
 			startupTimeoutHandle = setTimeout(() => {
-				this._logService.error(`[LocalProcessExtensionHost]: Extension host did not start in 10 seconds (debugBrk: ${this._isExtensionDevDebugBrk})`);
+				// Suppress false alarm warning if window is currently inactive in Spaces
+				if (typeof document !== 'undefined' && document.body.classList.contains('spaces-inactive')) {
+					return;
+				}
+
+				this._logService.error(`[LocalProcessExtensionHost]: Extension host did not start in ${timeoutMs / 1000} seconds (debugBrk: ${this._isExtensionDevDebugBrk})`);
 
 				const msg = this._isExtensionDevDebugBrk
 					? nls.localize('extensionHost.startupFailDebug', "Extension host did not start in 10 seconds, it might be stopped on the first line and needs a debugger to continue.")
@@ -369,7 +375,7 @@ export class NativeLocalProcessExtensionHost extends Disposable implements IExte
 						priority: NotificationPriority.URGENT
 					}
 				);
-			}, 10000);
+			}, timeoutMs);
 		}
 
 		// Initialize extension host process with hand shakes

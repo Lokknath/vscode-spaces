@@ -34,7 +34,7 @@ import { ITelemetryService } from '../../telemetry/common/telemetry.js';
 import { ThemeIcon } from '../../../base/common/themables.js';
 import { IThemeMainService } from '../../theme/electron-main/themeMainService.js';
 import { getMenuBarVisibility, IFolderToOpen, INativeWindowConfiguration, IWindowSettings, IWorkspaceToOpen, MenuBarVisibility, hasNativeTitlebar, useNativeFullScreen, useWindowControlsOverlay, DEFAULT_CUSTOM_TITLEBAR_HEIGHT, TitlebarStyle, MenuSettings } from '../../window/common/window.js';
-import { defaultBrowserWindowOptions, getAllWindowsExcludingOffscreen, IWindowsMainService, OpenContext, WindowStateValidator } from './windows.js';
+import { defaultBrowserWindowOptions, getAllWindowsExcludingOffscreen, IDefaultBrowserWindowOptionsOverrides, IWindowsMainService, OpenContext, WindowStateValidator } from './windows.js';
 import { ISingleFolderWorkspaceIdentifier, IWorkspaceIdentifier, isSingleFolderWorkspaceIdentifier, isWorkspaceIdentifier, toWorkspaceIdentifier } from '../../workspace/common/workspace.js';
 import { IWorkspacesManagementMainService } from '../../workspaces/electron-main/workspacesManagementMainService.js';
 import { IWindowState, ICodeWindow, ILoadEvent, WindowMode, WindowError, LoadReason, defaultWindowState, IBaseWindow } from '../../window/electron-main/window.js';
@@ -54,6 +54,9 @@ export interface IWindowCreationOptions {
 	readonly extensionDevelopmentPath?: string[];
 	readonly isExtensionTestHost?: boolean;
 	readonly isSessionsWindow?: boolean;
+	readonly dontShow?: boolean;
+	readonly isInitialStartup?: boolean;
+	readonly remoteAuthority?: string;
 }
 
 interface ITouchBarSegment extends electron.SegmentedControlSegment {
@@ -144,6 +147,7 @@ class DockBadgeManager {
 
 export abstract class BaseWindow extends Disposable implements IBaseWindow {
 
+	protected creationOptions?: IWindowCreationOptions;
 	private applicationBadgeWindowId: number | undefined;
 
 	//#region Events
@@ -351,7 +355,9 @@ export abstract class BaseWindow extends Disposable implements IBaseWindow {
 
 			// to reduce flicker from the default window size
 			// to maximize or fullscreen, we only show after
-			this._win?.show();
+			if (!this.creationOptions?.dontShow) {
+				this._win?.show();
+			}
 		}
 	}
 
@@ -709,7 +715,9 @@ export class CodeWindow extends BaseWindow implements ICodeWindow {
 		return this.userDataProfilesService.getProfileForWorkspace(this.config.workspace ?? toWorkspaceIdentifier(this.backupPath, this.isExtensionDevelopmentHost)) ?? this.userDataProfilesService.defaultProfile;
 	}
 
-	get remoteAuthority(): string | undefined { return this._config?.remoteAuthority; }
+	get remoteAuthority(): string | undefined { return this._config?.remoteAuthority ?? this.creationOptions.remoteAuthority; }
+
+	get isInitialStartup(): boolean | undefined { return this._config?.isInitialStartup ?? this.creationOptions.isInitialStartup; }
 
 	private readonly _iconPath: URI | undefined;
 	get iconPath(): URI | undefined { return this._iconPath; }
@@ -746,6 +754,8 @@ export class CodeWindow extends BaseWindow implements ICodeWindow {
 	private readonly jsCallStackCollector: Delayer<void>;
 	private readonly jsCallStackCollectorStopScheduler: RunOnceScheduler;
 
+	protected override readonly creationOptions: IWindowCreationOptions;
+
 	constructor(
 		config: IWindowCreationOptions,
 		@ILogService logService: ILogService,
@@ -770,6 +780,7 @@ export class CodeWindow extends BaseWindow implements ICodeWindow {
 		@IInstantiationService instantiationService: IInstantiationService
 	) {
 		super(configurationService, stateService, environmentMainService, logService);
+		this.creationOptions = config;
 
 		//#region create browser window
 		{
@@ -789,7 +800,12 @@ export class CodeWindow extends BaseWindow implements ICodeWindow {
 				webPreferences.backgroundThrottling = false; // keep agents window responsive when in background
 			}
 
-			const options = instantiationService.invokeFunction(defaultBrowserWindowOptions, this.windowState, undefined, webPreferences);
+			const overrides: IDefaultBrowserWindowOptionsOverrides = {};
+			if (config.dontShow) {
+				overrides.show = false;
+			}
+
+			const options = instantiationService.invokeFunction(defaultBrowserWindowOptions, this.windowState, overrides, webPreferences);
 			const iconPath = config.isSessionsWindow && isWindows ? join(this.environmentMainService.appRoot, 'resources/win32/sessions.ico') : undefined;
 			if (iconPath) {
 				options.icon = iconPath;

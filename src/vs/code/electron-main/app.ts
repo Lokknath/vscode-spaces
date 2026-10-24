@@ -554,8 +554,19 @@ export class CodeApplication extends Disposable {
 		app.on('activate', async (event, hasVisibleWindows) => {
 			this.logService.trace('app#activate');
 
-			// Mac only event: open new window when we get activated
+			// Mac only event: reveal active space or open new window when activated
 			if (!hasVisibleWindows) {
+				try {
+					const spacesService = this.mainInstantiationService?.invokeFunction((accessor: ServicesAccessor) => accessor.get(ISpacesMainService));
+					const snapshot = await spacesService?.getSpaces(undefined);
+					if (snapshot && snapshot.spaces.length > 0) {
+						await spacesService?.revealCurrentSpace(undefined);
+						return;
+					}
+				} catch {
+					// Fall through to openEmptyWindow
+				}
+
 				await this.windowsMainService?.openEmptyWindow({ context: OpenContext.DOCK });
 			}
 		});
